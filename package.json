@@ -9,6 +9,7 @@
     "dist",
     "src",
     "README.md",
+    "package.json",
     "LICENSE"
   ],
   "exports": {

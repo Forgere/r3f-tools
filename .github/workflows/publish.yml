@@ -16,15 +16,13 @@ jobs:
       with:
         node-version: '18'
         registry-url: 'https://registry.npmjs.org'
-        cache: 'npm'
+        cache: 'bun'
         
     - name: Install dependencies
-      run: npm ci
+      run: bun ci
       
     - name: Build
-      run: npm run build
+      run: bun run build
       
-    - name: Publish to NPM
+    - name: Publish to npm
       run: npm publish
-      env:
-        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
