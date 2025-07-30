@@ -8,9 +8,9 @@ export type InstancedMeshPoolProps = {
   batchSize?: number
   matrixs: THREE.Matrix4[]
   colors?: THREE.Color[]
-  onClick?: (e: any, index: number) => void
-  onPointerOver?: (e: any, index: number) => void
-  onPointerOut?: (e: any, index: number) => void
+  onClick?: (e: ThreeEvent<THREE.Event>, index: number) => void
+  onPointerOver?: (e: ThreeEvent<THREE.Event>, index: number) => void
+  onPointerOut?: (e: ThreeEvent<THREE.Event>, index: number) => void
 }
 
 export function InstancedMeshPool({
@@ -75,18 +75,19 @@ export function InstancedMeshPool({
       {meshGroups.current.map((mesh, groupIndex) => {
         const offset = groupIndex * batchSize
         return (
-          <primitive
+          <primitive 
             key={groupIndex}
+            /* eslint-disable react/no-unknown-property */
             object={mesh}
-            onClick={(e: ThreeEvent<Event>) => {
+            onClick={(e: ThreeEvent<THREE.Event>) => {
               const index = offset + e.instanceId!
               if (onClick) onClick(e, index)
             }}
-            onPointerOver={(e: ThreeEvent<Event>) => {
+            onPointerOver={(e: ThreeEvent<THREE.Event>) => {
               const index = offset + e.instanceId!
               if (onPointerOver) onPointerOver(e, index)
             }}
-            onPointerOut={(e: ThreeEvent<Event>) => {
+            onPointerOut={(e: ThreeEvent<THREE.Event>) => {
               const index = offset + e.instanceId!
               if (onPointerOut) onPointerOut(e, index)
             }}
