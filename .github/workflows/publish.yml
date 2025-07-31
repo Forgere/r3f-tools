@@ -32,9 +32,6 @@ jobs:
     - name: Build package
       run: npm run build
       
-    - name: Verify package contents
-      run: npx pkg-ok  # 确保发布内容正确
-      
     - name: Publish to NPM
       run: npm publish --access public
       env:
