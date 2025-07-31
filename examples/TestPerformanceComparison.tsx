@@ -51,13 +51,13 @@ function TestScene({ onInstanceCountChange, isInstance = true }: { onInstanceCou
     const interval = setInterval(() => {
       setInstances(prev => {
         if (isIncreasing) {
-          if (prev.length >= 10000) {
+          if (prev.length >= 100000) {
             setIsIncreasing(false)
             return prev.slice(0, -100) // Remove 100 instances
           } else {
             // Add 100 new instances
             const newInstances = []
-            for (let i = 0; i < 1000; i++) {
+            for (let i = 0; i < 10000; i++) {
               newInstances.push({
                 position: [
                   (Math.random() - 0.5) * 50,
@@ -157,7 +157,7 @@ function TestScene({ onInstanceCountChange, isInstance = true }: { onInstanceCou
             onClick={handleClick}
             // onPointerOver={handlePointerOver}
             // onPointerOut={handlePointerOut}
-            batchSize={1000}
+            batchSize={10000}
           />
         ) : (
           <MeshPool
@@ -182,7 +182,7 @@ export function TestInstancedMeshPool() {
 
   return (
     <>
-      <div style={{ width: '100vw', height: '100vh', position: 'relative' }}>
+      <div style={{ width: '100vw', height: '50vh', position: 'relative' }}>
         <div style={{ 
           position: 'absolute', 
           top: 10, 
@@ -202,6 +202,29 @@ export function TestInstancedMeshPool() {
           <AdaptiveEvents />
           <Stats />
           <TestScene onInstanceCountChange={setInstanceCount} />
+        </Canvas>
+      </div>
+
+      <div style={{ width: '100vw', height: '50vh', position: 'relative' }}>
+        <div style={{ 
+          position: 'absolute', 
+          top: 10, 
+          left: 10, 
+          color: 'white', 
+          zIndex: 1000,
+          fontSize: '18px',
+          fontFamily: 'monospace',
+          background: 'rgba(0,0,0,0.7)',
+          padding: '10px',
+          borderRadius: '5px'
+        }}>
+          Instances: {instanceCount}
+        </div>
+        <Canvas camera={{ position: [0, 0, 60] } }>
+          <AdaptiveDpr />
+          <AdaptiveEvents />
+          <Stats className='bottom' />
+          <TestScene isInstance={false} onInstanceCountChange={setInstanceCount} />
         </Canvas>
       </div>
     </>
