@@ -151,8 +151,8 @@ function TestScene({ onInstanceCountChange }: { onInstanceCountChange: (count: n
         matrixs={matrixs}
         colors={colors}
         onClick={handleClick}
-        onPointerOver={handlePointerOver}
-        onPointerOut={handlePointerOut}
+        // onPointerOver={handlePointerOver}
+        // onPointerOut={handlePointerOut}
         batchSize={10}
       />
       <OrbitControls />
@@ -179,7 +179,7 @@ export function TestInstancedMeshPool() {
       }}>
         Instances: {instanceCount}
       </div>
-      <Canvas camera={{ position: [0, 0, 60] }}>
+      <Canvas camera={{ position: [0, 0, 60] } }>
         <TestScene onInstanceCountChange={setInstanceCount} />
       </Canvas>
     </div>
