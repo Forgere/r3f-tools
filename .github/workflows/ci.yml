@@ -13,18 +13,25 @@ jobs:
     strategy:
       matrix:
         node-version: [16.x, 18.x, 20.x]
+      fail-fast: false  # 继续运行其他版本即使某个失败
 
     steps:
     - uses: actions/checkout@v3
     
     - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4  # 升级到v4版本
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
+        check-latest: true
+      timeout-minutes: 5  # 设置单独步骤超时
+      # env:
+        # 使用国内镜像加速下载（可选）
+        # NODEJS_ORG_MIRROR: https://npmmirror.com/mirrors/node
         
     - name: Install dependencies
       run: npm ci
+      timeout-minutes: 3  # 安装依赖超时设置
       
     - name: Run linting
       run: npm run lint
