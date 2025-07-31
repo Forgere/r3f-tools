@@ -7,24 +7,40 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment: npm-publish  # 推荐添加环境保护
     
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v3
+    - name: Checkout code
+      uses: actions/checkout@v4
       with:
-        node-version: '18'
+        fetch-depth: 0  # 获取完整历史记录（包含标签）
+        
+    - name: Setup Node.js
+      uses: actions/setup-node@v4  # 升级到v4
+      with:
+        node-version: '20'
         registry-url: 'https://registry.npmjs.org'
         cache: 'npm'
+        cache-dependency-path: 'package-lock.json'  # 确保缓存正确
         
-    - name: Install dependencies
-      run: npm ci
+    - name: Verify Node.js version
+      run: node -v && npm -v  # 打印版本用于调试
       
-    - name: Build
+    - name: Install dependencies
+      run: npm ci --prefer-offline
+      
+    - name: Build package
       run: npm run build
       
+    - name: Verify package contents
+      run: npx pkg-ok  # 确保发布内容正确
+      
     - name: Publish to NPM
-      run: npm publish
+      run: npm publish --access public
       env:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        
+    - name: Post-publish verification
+      run: |
+        echo "Package published successfully!"
+        npm view ${{ env.npm_package_name }} version
