@@ -198,8 +198,8 @@ export function TestInstancedMeshPool() {
           Instances: {instanceCount}
         </div>
         <Canvas camera={{ position: [0, 0, 60] } }>
-          <AdaptiveDpr />
-          <AdaptiveEvents />
+          {/* <AdaptiveDpr />
+          <AdaptiveEvents /> */}
           <Stats />
           <TestScene onInstanceCountChange={setInstanceCount} />
         </Canvas>

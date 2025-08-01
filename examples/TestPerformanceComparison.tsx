@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { Canvas } from '@react-three/fiber'
-import { AdaptiveDpr, AdaptiveEvents, OrbitControls, Stats } from '@react-three/drei'
+import { AdaptiveDpr, AdaptiveEvents, Bvh, OrbitControls, Stats } from '@react-three/drei'
 import { InstancedMeshPool } from '../src/components/InstanceMeshPool'
 import { useMemo, useState, useEffect } from 'react'
 import { MeshPool } from '../src/components/MeshPool'
@@ -157,7 +157,7 @@ function TestScene({ onInstanceCountChange, isInstance = true }: { onInstanceCou
             onClick={handleClick}
             // onPointerOver={handlePointerOver}
             // onPointerOut={handlePointerOut}
-            batchSize={10000}
+            batchSize={2000}
           />
         ) : (
           <MeshPool
@@ -177,7 +177,7 @@ function TestScene({ onInstanceCountChange, isInstance = true }: { onInstanceCou
   )
 }
 
-export function TestInstancedMeshPool() {
+export function TestPerformanceComparison() {
   const [instanceCount, setInstanceCount] = useState(100)
 
   return (
@@ -224,7 +224,9 @@ export function TestInstancedMeshPool() {
           <AdaptiveDpr />
           <AdaptiveEvents />
           <Stats className='bottom' />
-          <TestScene isInstance={false} onInstanceCountChange={setInstanceCount} />
+          <Bvh>
+            <TestScene isInstance={false} onInstanceCountChange={setInstanceCount} />
+          </Bvh>
         </Canvas>
       </div>
     </>
