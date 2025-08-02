@@ -169,8 +169,8 @@ function AnimatedScene() {
         maxInstances={instanceCount}
         batchSize={10000}
         enableColors={true}
-        onClick={handleInstanceClick}
-        onPointerOver={handleInstanceClick}
+        // onClick={handleInstanceClick}
+        // onPointerOver={handleInstanceClick}
       />
 
       <OrbitControls />
