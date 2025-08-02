@@ -258,10 +258,17 @@ function AnimatedScene() {
 export function AnimatedInstancesExample() {
   return (
     <div style={{ width: '100vw', height: '100vh' }}>
+      <style>{`
+        .stats-fps { position: fixed !important; top: 10px !important; left: 10px !important; }
+        .stats-ms { position: fixed !important; top: 10px !important; left: 100px !important; }
+        .stats-memory { position: fixed !important; top: 10px !important; left: 190px !important; }
+      `}</style>
       <Canvas camera={{ position: [15, 10, 15], fov: 60 }}>
         <AdaptiveDpr pixelated />
         <AdaptiveEvents />
-        <Stats />
+        <Stats showPanel={0} className="stats-fps" />
+        <Stats showPanel={1} className="stats-ms" />
+        <Stats showPanel={2} className="stats-memory" />
         <AnimatedScene />
       </Canvas>
     </div>

@@ -116,14 +116,6 @@ export const InstancedMeshPool = forwardRef<InstancedMeshPoolRef, InstancedMeshP
     }
     mesh.instanceMatrix.needsUpdate = true
 
-    // 计算几何体和实例的边界框
-    geometry.computeBoundingBox()
-    geometry.computeBoundingSphere()
-    
-    // 强制重新计算边界框
-    mesh.computeBoundingBox()
-    mesh.computeBoundingSphere()
-
     if (enableColors) {
       const colorArray = new Float32Array(batchSize * 3)
       mesh.instanceColor = new THREE.InstancedBufferAttribute(colorArray, 3)
