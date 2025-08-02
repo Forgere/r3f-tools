@@ -57,7 +57,6 @@ export const InstancedMeshPool = forwardRef<InstancedMeshPoolRef, InstancedMeshP
     
     // 处理dirty的矩阵批次
     if (dirtyMatrixBatches.current.size > 0) {
-      console.log(dirtyMatrixBatches.current.size)
       dirtyMatrixBatches.current.forEach(batchIndex => {
         const mesh = meshGroups.current[batchIndex]
         if (mesh) {
