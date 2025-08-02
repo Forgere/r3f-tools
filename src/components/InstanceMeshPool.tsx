@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { useRef, forwardRef, useImperativeHandle } from 'react'
+import { useRef, forwardRef, useImperativeHandle, useCallback } from 'react'
 import { ThreeEvent } from '@react-three/fiber'
 
 const FarDistance = 10000
@@ -7,6 +7,8 @@ const FarDistance = 10000
 export interface InstancedMeshPoolRef {
   setMatrixAt: (index: number, matrix: THREE.Matrix4) => void
   setColorAt: (index: number, color: THREE.Color) => void
+  setMatrices: (matrices: THREE.Matrix4[], startIndex?: number) => void
+  setColors: (colors: THREE.Color[], startIndex?: number) => void
   setInstanceCount: (count: number) => void
   updateMatrices: () => void
   updateColors: () => void
@@ -37,6 +39,11 @@ export const InstancedMeshPool = forwardRef<InstancedMeshPoolRef, InstancedMeshP
   const meshGroups = useRef<THREE.InstancedMesh[]>([])
   const batchSizeRef = useRef(batchSize)
   const currentInstanceCount = useRef(0)
+  
+  // 内部缓存状态 - 跟踪需要更新的批次
+  const dirtyMatrixBatches = useRef<Set<number>>(new Set())
+  const dirtyColorBatches = useRef<Set<number>>(new Set())
+  const needsBoundingBoxUpdate = useRef(false)
 
   useImperativeHandle(ref, () => ({
     setMatrixAt: (index: number, matrix: THREE.Matrix4) => {
@@ -45,6 +52,8 @@ export const InstancedMeshPool = forwardRef<InstancedMeshPoolRef, InstancedMeshP
       const mesh = meshGroups.current[groupIndex]
       if (mesh) {
         mesh.setMatrixAt(instanceIndex, matrix)
+        dirtyMatrixBatches.current.add(groupIndex)
+        needsBoundingBoxUpdate.current = true
       }
     },
     setColorAt: (index: number, color: THREE.Color) => {
@@ -53,7 +62,45 @@ export const InstancedMeshPool = forwardRef<InstancedMeshPoolRef, InstancedMeshP
       const mesh = meshGroups.current[groupIndex]
       if (mesh) {
         mesh.setColorAt(instanceIndex, color)
+        dirtyColorBatches.current.add(groupIndex)
       }
+    },
+    setMatrices: (matrices: THREE.Matrix4[], startIndex = 0) => {
+      const affectedBatches = new Set<number>()
+      matrices.forEach((matrix, i) => {
+        const index = startIndex + i
+        const groupIndex = Math.floor(index / batchSizeRef.current)
+        const instanceIndex = index % batchSizeRef.current
+        const mesh = meshGroups.current[groupIndex]
+        if (mesh) {
+          mesh.setMatrixAt(instanceIndex, matrix)
+          affectedBatches.add(groupIndex)
+        }
+      })
+      // 批量添加受影响的批次
+      affectedBatches.forEach(batchIndex => {
+        dirtyMatrixBatches.current.add(batchIndex)
+      })
+      if (affectedBatches.size > 0) {
+        needsBoundingBoxUpdate.current = true
+      }
+    },
+    setColors: (colors: THREE.Color[], startIndex = 0) => {
+      const affectedBatches = new Set<number>()
+      colors.forEach((color, i) => {
+        const index = startIndex + i
+        const groupIndex = Math.floor(index / batchSizeRef.current)
+        const instanceIndex = index % batchSizeRef.current
+        const mesh = meshGroups.current[groupIndex]
+        if (mesh) {
+          mesh.setColorAt(instanceIndex, color)
+          affectedBatches.add(groupIndex)
+        }
+      })
+      // 批量添加受影响的批次
+      affectedBatches.forEach(batchIndex => {
+        dirtyColorBatches.current.add(batchIndex)
+      })
     },
     setInstanceCount: (count: number) => {
       currentInstanceCount.current = count
@@ -68,21 +115,42 @@ export const InstancedMeshPool = forwardRef<InstancedMeshPoolRef, InstancedMeshP
       }
     },
     updateMatrices: () => {
-      meshGroups.current.forEach(mesh => {
-        mesh.instanceMatrix.needsUpdate = true
-        // 强制重新计算边界框以确保正确的射线投射
-        mesh.boundingBox = null
-        mesh.boundingSphere = null
-        mesh.computeBoundingBox()
-        mesh.computeBoundingSphere()
+      // 只更新标记为dirty的批次
+      dirtyMatrixBatches.current.forEach(batchIndex => {
+        const mesh = meshGroups.current[batchIndex]
+        if (mesh) {
+          mesh.instanceMatrix.needsUpdate = true
+        }
       })
+      
+      // 只在必要时更新边界框
+      if (needsBoundingBoxUpdate.current) {
+        dirtyMatrixBatches.current.forEach(batchIndex => {
+          const mesh = meshGroups.current[batchIndex]
+          if (mesh) {
+            mesh.boundingBox = null
+            mesh.boundingSphere = null
+            mesh.computeBoundingBox()
+            mesh.computeBoundingSphere()
+          }
+        })
+        needsBoundingBoxUpdate.current = false
+      }
+      
+      // 清空dirty标记
+      dirtyMatrixBatches.current.clear()
     },
     updateColors: () => {
-      meshGroups.current.forEach(mesh => {
-        if (mesh.instanceColor) {
+      // 只更新标记为dirty的批次
+      dirtyColorBatches.current.forEach(batchIndex => {
+        const mesh = meshGroups.current[batchIndex]
+        if (mesh && mesh.instanceColor) {
           mesh.instanceColor.needsUpdate = true
         }
       })
+      
+      // 清空dirty标记
+      dirtyColorBatches.current.clear()
     },
     computeBoundingBox: () => {
       meshGroups.current.forEach(mesh => {
@@ -91,6 +159,7 @@ export const InstancedMeshPool = forwardRef<InstancedMeshPoolRef, InstancedMeshP
         mesh.computeBoundingBox()
         mesh.computeBoundingSphere()
       })
+      needsBoundingBoxUpdate.current = false
     }
   }), [])
 
@@ -132,6 +201,34 @@ export const InstancedMeshPool = forwardRef<InstancedMeshPoolRef, InstancedMeshP
   }
 
 
+  // 缓存事件处理函数避免重新创建
+  const handleClick = useCallback((offset: number) => {
+    return (e: ThreeEvent<THREE.Event>) => {
+      if (e.instanceId !== undefined && onClick) {
+        const index = offset + e.instanceId
+        onClick(e, index)
+      }
+    }
+  }, [onClick])
+
+  const handlePointerOver = useCallback((offset: number) => {
+    return (e: ThreeEvent<THREE.Event>) => {
+      if (e.instanceId !== undefined && onPointerOver) {
+        const index = offset + e.instanceId
+        onPointerOver(e, index)
+      }
+    }
+  }, [onPointerOver])
+
+  const handlePointerOut = useCallback((offset: number) => {
+    return (e: ThreeEvent<THREE.Event>) => {
+      if (e.instanceId !== undefined && onPointerOut) {
+        const index = offset + e.instanceId
+        onPointerOut(e, index)
+      }
+    }
+  }, [onPointerOut])
+
   return (
     <>
       {meshGroups.current.map((mesh, groupIndex) => {
@@ -141,25 +238,9 @@ export const InstancedMeshPool = forwardRef<InstancedMeshPoolRef, InstancedMeshP
             key={groupIndex}
             /* eslint-disable react/no-unknown-property */
             object={mesh}
-            onClick={(e: ThreeEvent<THREE.Event>) => {
-              console.log(`Clicked on instance group ${groupIndex}`)
-              if (e.instanceId !== undefined && onClick) {
-                const index = offset + e.instanceId
-                onClick(e, index)
-              }
-            }}
-            onPointerOver={(e: ThreeEvent<THREE.Event>) => {
-              if (e.instanceId !== undefined && onPointerOver) {
-                const index = offset + e.instanceId
-                onPointerOver(e, index)
-              }
-            }}
-            onPointerOut={(e: ThreeEvent<THREE.Event>) => {
-              if (e.instanceId !== undefined && onPointerOut) {
-                const index = offset + e.instanceId
-                onPointerOut(e, index)
-              }
-            }}
+            onClick={handleClick(offset)}
+            onPointerOver={handlePointerOver(offset)}
+            onPointerOut={handlePointerOut(offset)}
           />
         )
       })}

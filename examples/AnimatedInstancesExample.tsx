@@ -139,7 +139,6 @@ function AnimatedScene() {
 
   // 处理点击事件 - 改变轨迹类型
   const handleInstanceClick = (_: any, index: number) => {
-    console.log(`Instance ${index} clicked`)
     if (index < instancesRef.current.length) {
       const trajectories: TrajectoryType[] = ['circle', 'sine', 'spiral', 'figure8']
       const instance = instancesRef.current[index]
@@ -168,7 +167,7 @@ function AnimatedScene() {
         geometry={geometry}
         material={material}
         maxInstances={instanceCount}
-        batchSize={1000}
+        batchSize={10000}
         enableColors={true}
         onClick={handleInstanceClick}
         onPointerOver={handleInstanceClick}
