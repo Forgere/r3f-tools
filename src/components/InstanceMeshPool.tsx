@@ -51,6 +51,42 @@ export const InstancedMeshPool = forwardRef<InstancedMeshPoolRef, InstancedMeshP
     return !!(onClick || onPointerOver || onPointerOut || frustumCulled)
   }
 
+  // 封装的计算函数，处理dirty batches并清除
+  const processUpdatesAndClearDirtyBatches = useCallback(() => {
+    const needsBoundsUpdate = shouldComputeBounds()
+    
+    // 处理dirty的矩阵批次
+    if (dirtyMatrixBatches.current.size > 0) {
+      console.log(dirtyMatrixBatches.current.size)
+      dirtyMatrixBatches.current.forEach(batchIndex => {
+        const mesh = meshGroups.current[batchIndex]
+        if (mesh) {
+          mesh.instanceMatrix.needsUpdate = true
+          
+          // 只有在需要时才计算边界框
+          if (needsBoundsUpdate) {
+            mesh.boundingBox = null
+            mesh.boundingSphere = null
+            mesh.computeBoundingBox()
+            mesh.computeBoundingSphere()
+          }
+        }
+      })
+      dirtyMatrixBatches.current.clear()
+    }
+    
+    // 处理dirty的颜色批次
+    if (dirtyColorBatches.current.size > 0) {
+      dirtyColorBatches.current.forEach(batchIndex => {
+        const mesh = meshGroups.current[batchIndex]
+        if (mesh && mesh.instanceColor) {
+          mesh.instanceColor.needsUpdate = true
+        }
+      })
+      dirtyColorBatches.current.clear()
+    }
+  }, [onClick, onPointerOver, onPointerOut, frustumCulled])
+
   useImperativeHandle(ref, () => ({
     setMatrixAt: (index: number, matrix: THREE.Matrix4) => {
       const groupIndex = Math.floor(index / batchSizeRef.current)
@@ -121,38 +157,10 @@ export const InstancedMeshPool = forwardRef<InstancedMeshPoolRef, InstancedMeshP
       }
     },
     updateMatrices: () => {
-      const needsBoundsUpdate = shouldComputeBounds()
-      
-      // 更新所有dirty的矩阵批次
-      dirtyMatrixBatches.current.forEach(batchIndex => {
-        const mesh = meshGroups.current[batchIndex]
-        if (mesh) {
-          mesh.instanceMatrix.needsUpdate = true
-          
-          // 只有在需要时才计算边界框
-          if (needsBoundsUpdate) {
-            mesh.boundingBox = null
-            mesh.boundingSphere = null
-            mesh.computeBoundingBox()
-            mesh.computeBoundingSphere()
-          }
-        }
-      })
-      
-      // 清空dirty标记
-      dirtyMatrixBatches.current.clear()
+      processUpdatesAndClearDirtyBatches()
     },
     updateColors: () => {
-      // 更新所有dirty的颜色批次
-      dirtyColorBatches.current.forEach(batchIndex => {
-        const mesh = meshGroups.current[batchIndex]
-        if (mesh && mesh.instanceColor) {
-          mesh.instanceColor.needsUpdate = true
-        }
-      })
-      
-      // 清空dirty标记
-      dirtyColorBatches.current.clear()
+      processUpdatesAndClearDirtyBatches()
     },
     computeBoundingBox: () => {
       meshGroups.current.forEach(mesh => {
@@ -232,37 +240,7 @@ export const InstancedMeshPool = forwardRef<InstancedMeshPoolRef, InstancedMeshP
 
   // 使用useFrame自动处理dirty batches，避免大数据量时卡死
   useFrame(() => {
-    const needsBoundsUpdate = shouldComputeBounds()
-    
-    // 处理dirty的矩阵批次
-    if (dirtyMatrixBatches.current.size > 0) {
-      dirtyMatrixBatches.current.forEach(batchIndex => {
-        const mesh = meshGroups.current[batchIndex]
-        if (mesh) {
-          mesh.instanceMatrix.needsUpdate = true
-          
-          // 只有在需要时才计算边界框
-          if (needsBoundsUpdate) {
-            mesh.boundingBox = null
-            mesh.boundingSphere = null
-            mesh.computeBoundingBox()
-            mesh.computeBoundingSphere()
-          }
-        }
-      })
-      dirtyMatrixBatches.current.clear()
-    }
-    
-    // 处理dirty的颜色批次
-    if (dirtyColorBatches.current.size > 0) {
-      dirtyColorBatches.current.forEach(batchIndex => {
-        const mesh = meshGroups.current[batchIndex]
-        if (mesh && mesh.instanceColor) {
-          mesh.instanceColor.needsUpdate = true
-        }
-      })
-      dirtyColorBatches.current.clear()
-    }
+    processUpdatesAndClearDirtyBatches()
   })
 
   return (

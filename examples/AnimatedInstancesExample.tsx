@@ -120,9 +120,6 @@ function AnimatedScene() {
       instance.color.setHSL(hue, saturation, lightness)
       meshPoolRef.current?.setColorAt(index, instance.color)
     })
-
-    meshPoolRef.current?.updateMatrices()
-    meshPoolRef.current?.updateColors()
   })
 
   // 处理实例数量变化
@@ -169,8 +166,8 @@ function AnimatedScene() {
         maxInstances={instanceCount}
         batchSize={10000}
         enableColors={true}
-        // onClick={handleInstanceClick}
-        // onPointerOver={handleInstanceClick}
+        onClick={handleInstanceClick}
+        onPointerOver={handleInstanceClick}
       />
 
       <OrbitControls />
