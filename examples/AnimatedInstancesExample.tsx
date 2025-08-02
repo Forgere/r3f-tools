@@ -167,7 +167,7 @@ function AnimatedScene() {
         ref={meshPoolRef}
         geometry={geometry}
         material={material}
-        maxInstances={100000}
+        maxInstances={instanceCount}
         batchSize={1000}
         enableColors={true}
         onClick={handleInstanceClick}
