@@ -1,8 +1,9 @@
 import * as THREE from 'three'
 import { Canvas, useFrame } from '@react-three/fiber'
-import { AdaptiveDpr, AdaptiveEvents, Html, OrbitControls, Stats } from '@react-three/drei'
+import { AdaptiveDpr, AdaptiveEvents, OrbitControls, Stats } from '@react-three/drei'
 import { InstancedMeshPool, InstancedMeshPoolRef } from '../src/components/InstanceMeshPool'
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useEffect, useCallback } from 'react'
+import { useControls, button } from 'leva'
 
 type TrajectoryType = 'circle' | 'sine' | 'spiral' | 'figure8'
 
@@ -17,10 +18,19 @@ interface Instance {
 
 function AnimatedScene() {
   const meshPoolRef = useRef<InstancedMeshPoolRef>(null)
-  const [instanceCount, setInstanceCount] = useState(1)
-  const [isPaused, setIsPaused] = useState(false)
   const timeRef = useRef(0)
   const instancesRef = useRef<Instance[]>([])
+
+  // Leva controls
+  const { instanceCount, isPaused, enableClicking } = useControls({
+    instanceCount: { value: 1000, min: 1, max: 100000, step: 1 },
+    isPaused: { value: false },
+    enableClicking: { value: true },
+    reset: button(() => {
+      timeRef.current = 0
+      initializeInstances(instanceCount)
+    })
+  })
 
   const geometry = useMemo(() => new THREE.BoxGeometry(0.5, 0.5, 0.5), [])
   const material = useMemo(() => new THREE.MeshStandardMaterial(), [])
@@ -66,7 +76,7 @@ function AnimatedScene() {
   }
 
   // 初始化实例
-  const initializeInstances = (count: number) => {
+  const initializeInstances = useCallback((count: number) => {
     const trajectories: TrajectoryType[] = ['circle', 'sine', 'spiral', 'figure8']
     const instances: Instance[] = []
 
@@ -89,7 +99,7 @@ function AnimatedScene() {
       meshPoolRef.current?.setColorAt(index, instance.color)
     })
     meshPoolRef.current?.updateColors()
-  }
+  }, [])
 
   // 动画循环
   useFrame((_, delta) => {
@@ -123,20 +133,19 @@ function AnimatedScene() {
   })
 
   // 处理实例数量变化
-  const handleInstanceCountChange = (newCount: number) => {
-    const clampedCount = Math.max(1, Math.min(100000, newCount))
-    setInstanceCount(clampedCount)
+  useEffect(() => {
+    const clampedCount = Math.max(1, Math.min(100000, instanceCount))
     
     if (clampedCount > instancesRef.current.length) {
       initializeInstances(clampedCount)
     } else {
       meshPoolRef.current?.setInstanceCount(clampedCount)
     }
-  }
+  }, [instanceCount, initializeInstances])
 
   // 处理点击事件 - 改变轨迹类型
   const handleInstanceClick = (_: any, index: number) => {
-    if (index >= instancesRef.current.length) return
+    if (!enableClicking || index >= instancesRef.current.length) return
     
     const trajectories: TrajectoryType[] = ['circle', 'sine', 'spiral', 'figure8']
     const instance = instancesRef.current[index]
@@ -188,87 +197,11 @@ function AnimatedScene() {
         maxInstances={instanceCount}
         batchSize={10000}
         enableColors={true}
-        onClick={handleInstanceClick}
-        onPointerOver={handleInstanceClick}
+        onClick={enableClicking ? handleInstanceClick : undefined}
+        onPointerOver={enableClicking ? handleInstanceClick : undefined}
       />
 
       <OrbitControls />
-
-      <Html>
-      {/* 控制面板 */}
-      <div style={{
-        position: 'absolute',
-        top: 10,
-        left: 10,
-        color: 'white',
-        fontFamily: 'monospace',
-        fontSize: '14px',
-        background: 'rgba(0,0,0,0.8)',
-        padding: '15px',
-        borderRadius: '8px',
-        zIndex: 1000
-      }}>
-        <div style={{ marginBottom: '10px' }}>
-          <strong>Animated Instances: {instanceCount}/10000</strong>
-        </div>
-        
-        <div style={{ marginBottom: '10px' }}>
-          <label>Count: </label>
-          <input 
-            type="range" 
-            min="1" 
-            max="100000" 
-            value={instanceCount}
-            onChange={(e) => handleInstanceCountChange(parseInt(e.target.value))}
-            style={{ width: '150px' }}
-          />
-          <span> {instanceCount}</span>
-        </div>
-
-        <div style={{ marginBottom: '10px' }}>
-          <button 
-            onClick={() => setIsPaused(!isPaused)}
-            style={{ 
-              padding: '5px 10px', 
-              marginRight: '10px',
-              background: isPaused ? '#4CAF50' : '#f44336',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer'
-            }}
-          >
-            {isPaused ? 'Play' : 'Pause'}
-          </button>
-
-          <button 
-            onClick={() => {
-              timeRef.current = 0
-              initializeInstances(instanceCount)
-            }}
-            style={{ 
-              padding: '5px 10px',
-              background: '#2196F3',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer'
-            }}
-          >
-            Reset
-          </button>
-        </div>
-
-        <div style={{ fontSize: '12px', opacity: 0.8 }}>
-          <div>• Circle (blue-ish): Circular motion</div>
-          <div>• Sine (green-ish): Wave motion</div>
-          <div>• Spiral (yellow-ish): Expanding spiral</div>
-          <div>• Figure8 (red-ish): Figure-8 pattern</div>
-          <div style={{ marginTop: '5px' }}>Click instances to change trajectory!</div>
-        </div>
-      </div>
-      </Html>
-
     </>
   )
 }
