@@ -28,6 +28,8 @@ jobs:
       # env:
         # 使用国内镜像加速下载（可选）
         # NODEJS_ORG_MIRROR: https://npmmirror.com/mirrors/node
+    - name: install pnpm
+      run: npm i -g pnpm
         
     - name: Install dependencies
       run: pnpm install
