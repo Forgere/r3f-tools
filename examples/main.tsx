@@ -1,11 +1,8 @@
-import React from 'react'
-import { createRoot } from 'react-dom/client'
-import { TestInstancedMeshPool } from './TestInstancedMeshPool'
-import { TestPerformanceComparison } from './TestPerformanceComparison'
-import { AnimatedInstancesExample } from './AnimatedInstancesExample'
+import { createRoot } from "react-dom/client";
+import { AnimatedInstancesExample } from "./AnimatedInstancesExample";
 
-const container = document.getElementById('root')
-if (!container) throw new Error('Root element not found')
+const container = document.getElementById("root");
+if (!container) throw new Error("Root element not found");
 
-const root = createRoot(container)
-root.render(<AnimatedInstancesExample />)
+const root = createRoot(container);
+root.render(<AnimatedInstancesExample />);
