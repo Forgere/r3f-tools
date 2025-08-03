@@ -136,15 +136,37 @@ function AnimatedScene() {
 
   // 处理点击事件 - 改变轨迹类型
   const handleInstanceClick = (_: any, index: number) => {
-    if (index < instancesRef.current.length) {
-      const trajectories: TrajectoryType[] = ['circle', 'sine', 'spiral', 'figure8']
-      const instance = instancesRef.current[index]
-      const currentIndex = trajectories.indexOf(instance.trajectory)
-      instance.trajectory = trajectories[(currentIndex + 1) % trajectories.length]
+    if (index >= instancesRef.current.length) return
+    
+    const trajectories: TrajectoryType[] = ['circle', 'sine', 'spiral', 'figure8']
+    const instance = instancesRef.current[index]
+    const currentIndex = trajectories.indexOf(instance.trajectory)
+    instance.trajectory = trajectories[(currentIndex + 1) % trajectories.length]
+    
+    // 重置相位避免突跳
+    instance.phase = timeRef.current * instance.speed
+    console.log(`Instance ${index} changed to ${instance.trajectory} trajectory`)
+    
+    // 如果暂停状态，立即更新位置和矩阵
+    if (isPaused) {
+      const position = getTrajectoryPosition(instance, timeRef.current)
+      const matrix = new THREE.Matrix4()
       
-      // 重置相位避免突跳
-      instance.phase = timeRef.current * instance.speed
-      console.log(`Instance ${index} changed to ${instance.trajectory} trajectory`)
+      // 添加旋转
+      const rotation = timeRef.current * instance.speed
+      matrix.makeRotationY(rotation)
+      matrix.setPosition(position)
+
+      meshPoolRef.current?.setMatrixAt(index, matrix)
+
+      // 动态改变颜色基于位置
+      const normalizedY = (position.y + 5) / 10
+      const hue = (instance.id / instanceCount) * 0.8
+      const saturation = 0.7
+      const lightness = 0.4 + normalizedY * 0.4
+      
+      instance.color.setHSL(hue, saturation, lightness)
+      meshPoolRef.current?.setColorAt(index, instance.color)
     }
   }
 
