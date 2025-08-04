@@ -5,7 +5,9 @@ import * as THREE from "three";
 const FarDistance = 10000;
 
 export interface InstancedMeshPoolRef {
+	getMatrixAt: (index: number, matrix: THREE.Matrix4) => THREE.Matrix4;
 	setMatrixAt: (index: number, matrix: THREE.Matrix4) => void;
+	getColorAt: (index: number, color: THREE.Color) => THREE.Color;
 	setColorAt: (index: number, color: THREE.Color) => void;
 	setMatrices: (matrices: THREE.Matrix4[], startIndex?: number) => void;
 	setColors: (colors: THREE.Color[], startIndex?: number) => void;
@@ -95,6 +97,15 @@ export const InstancedMeshPool = forwardRef<
 	useImperativeHandle(
 		ref,
 		() => ({
+			getMatrixAt: (index: number, matrix: THREE.Matrix4) => {
+				const groupIndex = Math.floor(index / batchSizeRef.current);
+				const instanceIndex = index % batchSizeRef.current;
+				const mesh = meshGroups.current[groupIndex];
+				if (mesh) {
+					mesh.getMatrixAt(instanceIndex, matrix);
+				}
+				return matrix
+			},
 			setMatrixAt: (index: number, matrix: THREE.Matrix4) => {
 				const groupIndex = Math.floor(index / batchSizeRef.current);
 				const instanceIndex = index % batchSizeRef.current;
@@ -103,6 +114,15 @@ export const InstancedMeshPool = forwardRef<
 					mesh.setMatrixAt(instanceIndex, matrix);
 					dirtyMatrixBatches.current.add(groupIndex);
 				}
+			},
+			getColorAt: (index: number, color: THREE.Color) => {
+				const groupIndex = Math.floor(index / batchSizeRef.current);
+				const instanceIndex = index % batchSizeRef.current;
+				const mesh = meshGroups.current[groupIndex];
+				if (mesh?.instanceColor) {
+					mesh.getColorAt(instanceIndex, color);
+				}
+				return color
 			},
 			setColorAt: (index: number, color: THREE.Color) => {
 				const groupIndex = Math.floor(index / batchSizeRef.current);
