@@ -5,6 +5,7 @@ A collection of useful components and utilities for React Three Fiber applicatio
 ## Features
 
 - **InstancedMeshPool**: High-performance instanced mesh rendering with dynamic batching
+- **GSAPAnimator**: GSAP-powered animation utility for Three.js Object3D instances
 - TypeScript support
 - Tree-shakeable exports
 - Optimized for large-scale 3D scenes
@@ -75,6 +76,124 @@ function Scene() {
 - `onClick?: (event, index) => void` - Click handler
 - `onPointerOver?: (event, index) => void` - Pointer over handler
 - `onPointerOut?: (event, index) => void` - Pointer out handler
+
+### GSAPAnimator
+
+A powerful animation utility that provides GSAP-powered animations for Three.js Object3D instances with queue management and continuous animation support.
+
+```tsx
+import { createAnimator } from 'r3f-tools'
+import { useRef, useEffect } from 'react'
+import * as THREE from 'three'
+
+function AnimatedCube() {
+  const meshRef = useRef<THREE.Mesh>(null)
+  
+  useEffect(() => {
+    if (!meshRef.current) return
+    
+    const animator = createAnimator(meshRef.current)
+    
+    // Basic animation
+    animator.animate({
+      position: { x: 5, y: 2, z: 0 },
+      rotation: { y: Math.PI },
+      duration: 2,
+      ease: 'power2.inOut',
+      onComplete: () => console.log('Animation completed!')
+    })
+    
+    // Cleanup on unmount
+    return () => animator.destroy()
+  }, [])
+
+  return (
+    <mesh ref={meshRef}>
+      <boxGeometry args={[1, 1, 1]} />
+      <meshStandardMaterial color="orange" />
+    </mesh>
+  )
+}
+```
+
+#### Animation Methods
+
+**Basic Animation**
+```tsx
+// Single animation
+await animator.animate({
+  position: { x: 10, y: 5, z: 0 },
+  rotation: { x: Math.PI / 2 },
+  duration: 1.5,
+  ease: 'bounce.out',
+  delay: 0.5
+})
+```
+
+**Sequence Animation**
+```tsx
+// Chain multiple animations
+await animator.animateSequence([
+  {
+    position: { x: 5, y: 0, z: 0 },
+    duration: 1,
+    ease: 'power2.out'
+  },
+  {
+    rotation: { y: Math.PI },
+    duration: 0.5,
+    ease: 'back.inOut'
+  },
+  {
+    position: { x: 0, y: 5, z: 0 },
+    rotation: { x: Math.PI / 4 },
+    duration: 1.2,
+    ease: 'elastic.out'
+  }
+])
+```
+
+**Continuous Animation (Data-Driven)**
+```tsx
+// Set up continuous animation with external data source
+animator.startContinuousAnimation(async () => {
+  // Fetch animation points from API or generate procedurally
+  const response = await fetch('/api/animation-points')
+  const data = await response.json()
+  
+  return data.map(point => ({
+    x: point.x,
+    y: point.y, 
+    z: point.z,
+    rotationY: point.angle,
+    duration: point.speed || 1
+  }))
+}, 2000) // Fetch new points every 2 seconds
+
+// Stop continuous animation
+animator.stopContinuousAnimation()
+```
+
+#### Animation Control
+
+```tsx
+// Pause/resume animations
+animator.pause()
+animator.resume()
+
+// Check if currently animating
+const isPlaying = animator.isPlaying()
+
+// Kill all animations
+animator.kill()
+
+// Complete cleanup
+animator.destroy()
+
+// Monitor animation queue
+const queueSize = animator.getQueueSize()
+const activeTweens = animator.getActiveTweensCount()
+```
 
 #### Imperative API (via ref)
 

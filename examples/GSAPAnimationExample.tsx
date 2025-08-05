@@ -122,7 +122,7 @@ function ManualControlTorus() {
             y: (Math.random() - 0.5) * 6,
             z: (Math.random() - 0.5) * 8,
             rotationY: Math.random() * Math.PI * 2,
-            duration: Math.random() * 2 + 1
+            duration: Math.random() * 10 + 1
           }
           animatorRef.current.addAnimationPoint(newPoint)
         }
