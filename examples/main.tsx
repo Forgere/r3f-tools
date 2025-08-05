@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
 import { AnimatedInstancesExample } from "./AnimatedInstancesExample";
 import GSAPAnimationExample from "./GSAPAnimationExample";
+import PathAnimationExample from "./PathAnimationExample";
 
 function App() {
   return (
@@ -30,12 +31,19 @@ function App() {
           >
             GSAP Animation
           </Link>
+          <Link 
+            to="/path-animation" 
+            style={{ color: 'white', textDecoration: 'none', padding: '5px 10px' }}
+          >
+            Path Animation
+          </Link>
         </nav>
         
         <div style={{ paddingTop: '60px' }}>
           <Routes>
             <Route path="/" element={<AnimatedInstancesExample />} />
             <Route path="/gsap-animation" element={<GSAPAnimationExample />} />
+            <Route path="/path-animation" element={<PathAnimationExample />} />
           </Routes>
         </div>
       </div>
