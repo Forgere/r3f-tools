@@ -1,9 +1,9 @@
-import { useRef, useEffect } from 'react'
-import { Canvas } from '@react-three/fiber'
-import { OrbitControls } from '@react-three/drei'
-import { createAnimator, type AnimationPoint } from '../src/utils/gsapAnimator'
 import type { Mesh } from 'three'
 import { useControls } from 'leva'
+import { useEffect, useRef} from 'react'
+import { OrbitControls } from '@react-three/drei'
+import { createAnimator, type AnimationPoint } from '../src/utils/gsapAnimator'
+import { Canvas } from '@react-three/fiber'
 
 /**
  * Mock 动画数据
@@ -30,7 +30,7 @@ const mockFetchAnimationPoints = async (): Promise<AnimationPoint[]> => {
  * 动态 Cube 组件
  */
 function ContinuousAnimatedCube({ offset = [0, 0, 0] }: { offset?: [number, number, number] }) {
-  const meshRef = useRef<Mesh>(null!)
+  const meshRef = useRef<Mesh>(null)
   const animatorRef = useRef<ReturnType<typeof createAnimator> | null>(null)
 
   useEffect(() => {
@@ -59,7 +59,7 @@ function MultipleCubes({ count }: { count: number }) {
   return (
     <>
       {Array.from({ length: count }).map((_, i) => (
-        <ContinuousAnimatedCube key={i} offset={[i * 2 - count, 0, 0]} />
+        <ContinuousAnimatedCube key={`cube${i + 1}`} offset={[i * 2 - count, 0, 0]} />
       ))}
     </>
   )
@@ -101,7 +101,7 @@ function PreDefinedSequenceSphere() {
  * Torus 动画
  */
 function ManualControlTorus() {
-  const meshRef = useRef<Mesh>(null!)
+  const meshRef = useRef<Mesh>(null)
   const animatorRef = useRef<ReturnType<typeof createAnimator> | null>(null)
 
   useEffect(() => {

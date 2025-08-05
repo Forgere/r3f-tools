@@ -104,7 +104,7 @@ export const InstancedMeshPool = forwardRef<
 				if (mesh) {
 					mesh.getMatrixAt(instanceIndex, matrix);
 				}
-				return matrix
+				return matrix;
 			},
 			setMatrixAt: (index: number, matrix: THREE.Matrix4) => {
 				const groupIndex = Math.floor(index / batchSizeRef.current);
@@ -122,7 +122,7 @@ export const InstancedMeshPool = forwardRef<
 				if (mesh?.instanceColor) {
 					mesh.getColorAt(instanceIndex, color);
 				}
-				return color
+				return color;
 			},
 			setColorAt: (index: number, color: THREE.Color) => {
 				const groupIndex = Math.floor(index / batchSizeRef.current);

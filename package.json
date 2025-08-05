@@ -27,9 +27,9 @@
 		"example:build": "vite build examples --config examples/vite.config.mjs",
 		"test": "jest",
 		"typecheck": "tsc --noEmit",
-		"lint": "biome lint --write",
+		"lint": "biome lint ./src/ --write && biome lint ./src/ --write",
 		"lint:fix": "biome check --write",
-		"format": "biome format --write",
+		"format": "biome format ./src/ --write && biome format ./src/ --write",
 		"prepublishOnly": "npm run build"
 	},
 	"keywords": [
