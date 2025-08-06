@@ -1,12 +1,12 @@
-import type { Mesh } from "three";
-import { useControls } from "leva";
-import { useEffect, useRef } from "react";
 import { OrbitControls } from "@react-three/drei";
 import { Canvas, useThree } from "@react-three/fiber";
+import { useControls } from "leva";
+import { useEffect, useRef } from "react";
+import type { Mesh } from "three";
 import {
-	moveAlongPath,
 	createPathAnimator,
-	PathAnimator,
+	moveAlongPath,
+	type PathAnimator,
 } from "../src/utils/moveAlongPath";
 
 /**
@@ -44,7 +44,7 @@ function SimplePathCube({
 				onComplete: () => {
 					console.log("Simple path animation completed!");
 				},
-				onUpdate: (progress) => {
+				onUpdate: (_progress) => {
 					// Optional: log progress
 				},
 			});
@@ -93,7 +93,7 @@ function ComplexPathSphere({
 					{ x: 0, y: 0, z: 0 },
 				];
 
-				await animatorRef.current!.moveAlongPath({
+				await animatorRef.current?.moveAlongPath({
 					positions,
 					duration: 12,
 					ease: "sine.inOut",
@@ -146,9 +146,9 @@ function InteractivePathTorus({
 				// Generate random path points
 				const positions = [
 					{
-						x: meshRef.current!.position.x,
-						y: meshRef.current!.position.y,
-						z: meshRef.current!.position.z,
+						x: meshRef.current?.position.x,
+						y: meshRef.current?.position.y,
+						z: meshRef.current?.position.z,
 					},
 					{
 						x: (Math.random() - 0.5) * 8,
@@ -167,7 +167,7 @@ function InteractivePathTorus({
 					},
 				];
 
-				await animatorRef.current!.moveAlongPath({
+				await animatorRef.current?.moveAlongPath({
 					positions,
 					duration: 6,
 					ease: "back.inOut(1.7)",

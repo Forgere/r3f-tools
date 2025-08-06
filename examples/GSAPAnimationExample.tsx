@@ -1,9 +1,9 @@
-import type { Mesh } from "three";
+import { OrbitControls } from "@react-three/drei";
+import { Canvas } from "@react-three/fiber";
 import { useControls } from "leva";
 import { useEffect, useRef } from "react";
-import { OrbitControls } from "@react-three/drei";
-import { createAnimator, type AnimationPoint } from "../src/utils/gsapAnimator";
-import { Canvas } from "@react-three/fiber";
+import type { Mesh } from "three";
+import { type AnimationPoint, createAnimator } from "../src/utils/gsapAnimator";
 
 /**
  * Mock 动画数据

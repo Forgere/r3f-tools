@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
+import { BrowserRouter, Link, Route, Routes } from "react-router-dom";
 import { AnimatedInstancesExample } from "./AnimatedInstancesExample";
 import GSAPAnimationExample from "./GSAPAnimationExample";
 import PathAnimationExample from "./PathAnimationExample";

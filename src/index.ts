@@ -4,11 +4,11 @@ export {
 	type InstancedMeshPoolRef,
 } from "./components/InstanceMeshPool";
 
-export { createAnimator, type AnimationPoint } from "./utils/gsapAnimator";
+export { type AnimationPoint, createAnimator } from "./utils/gsapAnimator";
 export {
-	moveAlongPath,
 	createPathAnimator,
+	type MoveAlongPathConfig,
+	moveAlongPath,
 	PathAnimator,
 	type PathPosition,
-	type MoveAlongPathConfig,
 } from "./utils/moveAlongPath";

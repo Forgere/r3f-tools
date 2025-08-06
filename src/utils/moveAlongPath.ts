@@ -2,12 +2,12 @@ import { gsap } from "gsap";
 import { MotionPathPlugin } from "gsap/MotionPathPlugin";
 import type { Object3D, Scene } from "three";
 import {
-	CatmullRomCurve3,
-	Vector3,
 	BufferGeometry,
+	CatmullRomCurve3,
 	Line,
 	LineBasicMaterial,
 	Quaternion,
+	Vector3,
 } from "three";
 
 gsap.registerPlugin(MotionPathPlugin);
