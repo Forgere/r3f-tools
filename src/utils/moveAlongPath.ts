@@ -1,7 +1,14 @@
 import { gsap } from "gsap";
 import { MotionPathPlugin } from "gsap/MotionPathPlugin";
-import type { Object3D } from "three";
-import { CatmullRomCurve3, Vector3 } from "three";
+import type { Object3D, Scene } from "three";
+import {
+	CatmullRomCurve3,
+	Vector3,
+	BufferGeometry,
+	Line,
+	LineBasicMaterial,
+	Quaternion,
+} from "three";
 
 gsap.registerPlugin(MotionPathPlugin);
 
@@ -20,6 +27,9 @@ export interface MoveAlongPathConfig {
 	onUpdate?: (progress: number) => void;
 	autoRotate?: boolean;
 	tension?: number;
+	debug?: boolean;
+	debugColor?: string;
+	debugScene?: Scene;
 }
 
 export function moveAlongPath(
@@ -27,7 +37,19 @@ export function moveAlongPath(
 	config: MoveAlongPathConfig,
 ): Promise<void> {
 	return new Promise((resolve) => {
-		const { positions, duration, ease = "power2.inOut", delay = 0, onComplete, onUpdate, autoRotate = false, tension = 0.5 } = config;
+		const {
+			positions,
+			duration,
+			ease = "power2.inOut",
+			delay = 0,
+			onComplete,
+			onUpdate,
+			autoRotate = false,
+			tension = 0.5,
+			debug = false,
+			debugColor = "#ff0000",
+			debugScene,
+		} = config;
 
 		if (positions.length < 2) {
 			console.warn("moveAlongPath requires at least 2 positions");
@@ -47,10 +69,23 @@ export function moveAlongPath(
 		// Create a smooth curve path using CatmullRomCurve3
 		const curve = new CatmullRomCurve3(points, false, "catmullrom", tension);
 
+		// Debug visualization
+		let debugLine: Line | null = null;
+		if (debug && debugScene) {
+			const curvePoints = curve.getPoints(100);
+			const geometry = new BufferGeometry().setFromPoints(curvePoints);
+			const material = new LineBasicMaterial({ color: debugColor });
+			debugLine = new Line(geometry, material);
+			debugScene.add(debugLine);
+			console.log(
+				"Debug: Curve path created with",
+				curvePoints.length,
+				"points",
+			);
+		}
+
 		// Create a proxy object to animate the path progress
 		const proxy = { progress: 0 };
-
-		let previousPosition = object3D.position.clone();
 
 		gsap.to(proxy, {
 			progress: 1,
@@ -64,21 +99,30 @@ export function moveAlongPath(
 
 				// Auto-rotate based on movement direction
 				if (autoRotate && proxy.progress > 0) {
-					const direction = point.sub(previousPosition).normalize();
-					if (direction.length() > 0.001) {
-						// Calculate rotation based on direction
-						const yaw = Math.atan2(direction.x, direction.z);
-						const pitch = Math.asin(-direction.y);
-						
-						object3D.rotation.y = yaw;
-						object3D.rotation.x = pitch;
-					}
-					previousPosition = point.clone();
+					const tangent = curve.getTangentAt(proxy.progress);
+
+					// Ensure rotation only on XZ plane (ignore Y axis direction)
+					tangent.y = 0;
+					tangent.normalize();
+
+					// Use horizontal tangent to calculate rotation
+					const quaternion = new Quaternion().setFromUnitVectors(
+						new Vector3(0, 0, 1), // Initial direction
+						tangent,
+					);
+
+					object3D.quaternion.copy(quaternion);
 				}
 
 				onUpdate?.(proxy.progress);
 			},
 			onComplete: () => {
+				// Clean up debug line
+				if (debugLine && debugScene) {
+					debugScene.remove(debugLine);
+					debugLine.geometry.dispose();
+					(debugLine.material as LineBasicMaterial).dispose();
+				}
 				onComplete?.();
 				resolve();
 			},
@@ -89,6 +133,7 @@ export function moveAlongPath(
 export class PathAnimator {
 	private object3D: Object3D;
 	private currentTween: gsap.core.Tween | null = null;
+	private debugLine: Line | null = null;
 	public isDestroyed = false;
 
 	constructor(object3D: Object3D) {
@@ -102,7 +147,19 @@ export class PathAnimator {
 		this.kill();
 
 		return new Promise((resolve) => {
-			const { positions, duration, ease = "power2.inOut", delay = 0, onComplete, onUpdate, autoRotate = false, tension = 0.5 } = config;
+			const {
+				positions,
+				duration,
+				ease = "power2.inOut",
+				delay = 0,
+				onComplete,
+				onUpdate,
+				autoRotate = false,
+				tension = 0.5,
+				debug = false,
+				debugColor = "#ff0000",
+				debugScene,
+			} = config;
 
 			if (positions.length < 2) {
 				console.warn("moveAlongPath requires at least 2 positions");
@@ -122,9 +179,22 @@ export class PathAnimator {
 			// Create curve path
 			const curve = new CatmullRomCurve3(points, false, "catmullrom", tension);
 
+			// Debug visualization
+			if (debug && debugScene) {
+				const curvePoints = curve.getPoints(100);
+				const geometry = new BufferGeometry().setFromPoints(curvePoints);
+				const material = new LineBasicMaterial({ color: debugColor });
+				this.debugLine = new Line(geometry, material);
+				debugScene.add(this.debugLine);
+				console.log(
+					"Debug: Curve path created with",
+					curvePoints.length,
+					"points",
+				);
+			}
+
 			// Animation proxy
 			const proxy = { progress: 0 };
-			let previousPosition = this.object3D.position.clone();
 
 			this.currentTween = gsap.to(proxy, {
 				progress: 1,
@@ -140,21 +210,32 @@ export class PathAnimator {
 
 					// Auto-rotate logic
 					if (autoRotate && proxy.progress > 0) {
-						const direction = point.sub(previousPosition).normalize();
-						if (direction.length() > 0.001) {
-							const yaw = Math.atan2(direction.x, direction.z);
-							const pitch = Math.asin(-direction.y);
-							
-							this.object3D.rotation.y = yaw;
-							this.object3D.rotation.x = pitch;
-						}
-						previousPosition = point.clone();
+						const tangent = curve.getTangentAt(proxy.progress);
+
+						// Ensure rotation only on XZ plane (ignore Y axis direction)
+						tangent.y = 0;
+						tangent.normalize();
+
+						// Use horizontal tangent to calculate rotation
+						const quaternion = new Quaternion().setFromUnitVectors(
+							new Vector3(0, 0, 1), // Initial direction
+							tangent,
+						);
+
+						this.object3D.quaternion.copy(quaternion);
 					}
 
 					onUpdate?.(proxy.progress);
 				},
 				onComplete: () => {
 					this.currentTween = null;
+					// Clean up debug line
+					if (this.debugLine && debugScene) {
+						debugScene.remove(this.debugLine);
+						this.debugLine.geometry.dispose();
+						(this.debugLine.material as LineBasicMaterial).dispose();
+						this.debugLine = null;
+					}
 					onComplete?.();
 					resolve();
 				},
@@ -166,6 +247,16 @@ export class PathAnimator {
 		if (this.currentTween) {
 			this.currentTween.kill();
 			this.currentTween = null;
+		}
+		// Clean up debug line if exists
+		if (this.debugLine) {
+			const scene = this.debugLine.parent;
+			if (scene) {
+				scene.remove(this.debugLine);
+			}
+			this.debugLine.geometry.dispose();
+			(this.debugLine.material as LineBasicMaterial).dispose();
+			this.debugLine = null;
 		}
 	}
 
@@ -182,7 +273,9 @@ export class PathAnimator {
 	}
 
 	isPlaying(): boolean {
-		return !this.isDestroyed && this.currentTween ? this.currentTween.isActive() : false;
+		return !this.isDestroyed && this.currentTween
+			? this.currentTween.isActive()
+			: false;
 	}
 
 	destroy(): void {
