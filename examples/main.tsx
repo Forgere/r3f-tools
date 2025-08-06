@@ -10,14 +10,15 @@ function App() {
       <div>
         <nav style={{
           position: 'fixed',
-          top: 0,
+          bottom: 0,
           left: 0,
           right: 0,
           background: 'rgba(0,0,0,0.8)',
           padding: '10px 20px',
           zIndex: 1000,
           display: 'flex',
-          gap: '20px'
+          gap: '20px',
+          overflow: 'auto'
         }}>
           <Link 
             to="/" 
