@@ -4,6 +4,12 @@ export {
 	type InstancedMeshPoolRef,
 } from "./components/InstanceMeshPool";
 
+export type { ConveyorBeltProps } from "./components/ConveyorBelt";
+export {
+	ConveyorBelt,
+	type ConveyorBeltRef,
+} from "./components/ConveyorBelt";
+
 export { type AnimationPoint, createAnimator } from "./utils/gsapAnimator";
 export {
 	createPathAnimator,
