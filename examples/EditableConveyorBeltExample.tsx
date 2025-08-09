@@ -179,7 +179,7 @@ function EditableConveyorBeltScene() {
 			frameHeight: { value: 0.5, min: 0.1, max: 1.2, step: 0.1 },
 			frameDepth: { value: 0.3, min: 0.05, max: 0.8, step: 0.05 },
 			rollerRadius: { value: 0.08, min: 0.02, max: 0.2, step: 0.01 },
-			segments: { value: 16, min: 8, max: 32, step: 1 },
+			segments: { value: 16, min: 8, max: 100, step: 1 },
 			animationSpeed: { value: 0.5, min: 0, max: 2, step: 0.1 },
 			showWireframe: false,
 			showPath: false,
