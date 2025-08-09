@@ -333,14 +333,28 @@ export const ConveyorBelt = forwardRef<ConveyorBeltRef, ConveyorBeltProps>(
 				side: THREE.DoubleSide,
 			});
 
-			return material;
+			return material as THREE.ShaderMaterial & {
+				uniforms: {
+					time: {
+						value: number
+					},
+					arrowSpacing: {
+						value: number
+					},
+					arrowSpeed: {
+						value: number
+					},
+					arrowLength: {
+						value: number
+					}
+				}
+			};
 		}, []);
 
 		// 动画旋转和路径材质更新
 		useFrame((state) => {
 			// 更新路径材质的时间uniform以实现动画效果
 			if (
-				defaultPathMaterial &&
 				defaultPathMaterial instanceof THREE.ShaderMaterial
 			) {
 				defaultPathMaterial.uniforms.time.value = state.clock.elapsedTime;
