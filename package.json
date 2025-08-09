@@ -1,6 +1,6 @@
 {
 	"name": "r3f-tools",
-	"version": "1.0.8",
+	"version": "1.0.9",
 	"description": "A collection of useful components and utilities for React Three Fiber",
 	"main": "dist/index.js",
 	"module": "dist/index.esm.js",
