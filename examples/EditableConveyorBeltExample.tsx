@@ -122,13 +122,8 @@ function EditableConveyorBeltScene() {
 		frameDepth,
 		rollerRadius,
 		segments,
-		animationSpeed,
 		showWireframe,
 		showPath,
-		resetPath,
-		addPointBefore,
-		addPointAfter,
-		deleteSelectedPoint,
 	} = useControls(
 		{
 			rollerSpacing: { value: 0.8, min: 0.2, max: 2.0, step: 0.1 },
@@ -244,19 +239,6 @@ function EditableConveyorBeltScene() {
 		[showWireframe],
 	);
 
-	const pathMaterial = useMemo(
-		() =>
-			new THREE.MeshStandardMaterial({
-				color: 0x1a4a8a,
-				roughness: 0.7,
-				metalness: 0.2,
-				transparent: true,
-				opacity: 0.8,
-				wireframe: showWireframe,
-			}),
-		[showWireframe],
-	);
-
 	return (
 		<group ref={groupRef}>
 			{/* Environment lights */}
@@ -283,7 +265,6 @@ function EditableConveyorBeltScene() {
 				rollerLength={frameWidth + 0.2}
 				frameMaterial={frameMaterial}
 				rollerMaterial={rollerMaterial}
-				pathMaterial={pathMaterial}
 				segments={segments}
 				showPath={showPath}
 			/>
@@ -291,7 +272,7 @@ function EditableConveyorBeltScene() {
 			{/* Editable Points */}
 			{points.map((point, index) => (
 				<EditPoint
-					key={`edit-point-${index}`}
+					key={`edit-point-${index.toString()}`}
 					point={point}
 					index={index}
 					isSelected={selectedPointIndex === index}

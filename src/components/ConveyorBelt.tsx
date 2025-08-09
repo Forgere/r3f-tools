@@ -1,3 +1,4 @@
+import { useFrame } from "@react-three/fiber";
 import { forwardRef, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import {
@@ -19,6 +20,10 @@ export interface ConveyorBeltProps {
 	rollerColor?: THREE.Color;
 	segments?: number;
 	showPath?: boolean;
+	showArrows?: boolean;
+	arrowSpacing?: number;
+	arrowSpeed?: number;
+	arrowLength?: number;
 }
 
 export interface ConveyorBeltRef {
@@ -43,6 +48,9 @@ export const ConveyorBelt = forwardRef<ConveyorBeltRef, ConveyorBeltProps>(
 			rollerColor = new THREE.Color(0x666666),
 			segments = 32,
 			showPath = false,
+			arrowSpacing = 1,
+			arrowSpeed = 0.5,
+			arrowLength = 0.3,
 		}: ConveyorBeltProps,
 		ref,
 	) {
@@ -269,16 +277,79 @@ export const ConveyorBelt = forwardRef<ConveyorBeltRef, ConveyorBeltProps>(
 			return geometry;
 		}, [curve, frameWidth, segments, showPath]);
 
+		// const defaultPathMaterial = useMemo(() => {
+		// 	return new THREE.MeshStandardMaterial({
+		// 		color: 0x333333,
+		// 		roughness: 0.8,
+		// 		metalness: 0.1,
+		// 		transparent: true,
+		// 		opacity: 0.6,
+		// 		side: THREE.DoubleSide,
+		// 	});
+		// }, []);
+
 		const defaultPathMaterial = useMemo(() => {
-			return new THREE.MeshStandardMaterial({
-				color: 0x333333,
-				roughness: 0.8,
-				metalness: 0.1,
+			// 创建自定义着色器材质实现绿色箭头动画
+			const material = new THREE.ShaderMaterial({
+				uniforms: {
+					time: { value: 0 },
+					color: { value: new THREE.Color(0x00ff00) }, // 绿色
+					arrowSpacing: { value: 1.0 }, // 箭头间距
+					arrowSpeed: { value: 0.5 }, // 箭头速度
+					arrowLength: { value: 0.3 }, // 箭头长度
+				},
+				vertexShader: `
+					varying vec2 vUv;
+					
+					void main() {
+						vUv = uv;
+						gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+					}
+				`,
+				fragmentShader: `
+					uniform float time;
+					uniform vec3 color;
+					uniform float arrowSpacing;
+					uniform float arrowSpeed;
+					uniform float arrowLength;
+					varying vec2 vUv;
+					
+					void main() {
+						// 创建沿着V方向(曲线方向)移动的箭头图案
+						float speed = time * arrowSpeed;
+						float pos = mod(vUv.y - speed, arrowSpacing);
+						
+						// 创建箭头形状 - 一个渐变的三角形
+						float arrow = 1.0 - smoothstep(0.0, arrowLength, pos);
+						arrow *= smoothstep(arrowLength, 0.0, pos - arrowLength);
+						
+						// 基础颜色和箭头颜色混合
+						vec3 finalColor = mix(color * 0.2, color, arrow);
+						
+						gl_FragColor = vec4(finalColor, 0.7);
+					}
+				`,
 				transparent: true,
-				opacity: 0.6,
 				side: THREE.DoubleSide,
 			});
+
+			return material;
 		}, []);
+
+		// 动画旋转和路径材质更新
+		useFrame((state) => {
+			// 更新路径材质的时间uniform以实现动画效果
+			if (
+				defaultPathMaterial &&
+				defaultPathMaterial instanceof THREE.ShaderMaterial
+			) {
+				defaultPathMaterial.uniforms.time.value = state.clock.elapsedTime;
+				// 更新其他uniforms
+				defaultPathMaterial.uniforms.arrowSpacing.value = arrowSpacing;
+				defaultPathMaterial.uniforms.arrowSpeed.value = arrowSpeed;
+				defaultPathMaterial.uniforms.arrowLength.value = arrowLength;
+			}
+		});
 
 		// 设置滚筒位置
 		useEffect(() => {
@@ -326,7 +397,7 @@ export const ConveyorBelt = forwardRef<ConveyorBeltRef, ConveyorBeltProps>(
 				{showPath && pathGeometry && (
 					<mesh
 						geometry={pathGeometry}
-						material={pathMaterial || defaultPathMaterial}
+						material={pathMaterial ?? defaultPathMaterial}
 					/>
 				)}
 			</group>
