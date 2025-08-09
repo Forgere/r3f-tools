@@ -307,7 +307,7 @@ function ConveyorBeltScene({
 
 			{/* 显示主路径点（辅助可视化） */}
 			{curvePath.map((point, index) => (
-				<mesh key={`main-${index}`} position={point}>
+				<mesh key={`main-${index.toString()}`} position={point}>
 					<sphereGeometry args={[0.05, 8, 8]} />
 					<meshBasicMaterial color={0xff4444} />
 				</mesh>

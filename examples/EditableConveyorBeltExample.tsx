@@ -5,11 +5,12 @@ import {
 	Stats,
 	TransformControls,
 } from "@react-three/drei";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useThree } from "@react-three/fiber";
 import { button, useControls } from "leva";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
+import { GLTFExporter } from "three-stdlib";
 import {
 	ConveyorBelt,
 	type ConveyorBeltRef,
@@ -60,6 +61,17 @@ const EditPoint: React.FC<{
 	);
 };
 
+function save(blob, filename) {
+	const link = document.createElement("a");
+	link.href = URL.createObjectURL(blob);
+	link.download = filename;
+	link.click();
+}
+
+function saveArrayBuffer(buffer, filename) {
+	save(new Blob([buffer], { type: "application/octet-stream" }), filename);
+}
+
 // Main scene component
 function EditableConveyorBeltScene() {
 	const conveyorRef = useRef<ConveyorBeltRef>(null);
@@ -70,6 +82,40 @@ function EditableConveyorBeltScene() {
 	const groupRef = useRef<THREE.Group>(null);
 	const transformControlRef = useRef<any>(null);
 	const transformTargetRef = useRef<THREE.Object3D>(new THREE.Object3D());
+
+	// Load points from localStorage on mount
+	useEffect(() => {
+		const savedPoints = localStorage.getItem("editableConveyorBeltPoints");
+		if (savedPoints) {
+			try {
+				const parsed = JSON.parse(savedPoints);
+				// Convert array of objects back to Vector3 instances
+				const loadedPoints = parsed.map(
+					(point: any) => new THREE.Vector3(point.x, point.y, point.z),
+				);
+				setPoints(loadedPoints);
+			} catch (e) {
+				console.error("Failed to parse saved points", e);
+			}
+		}
+	}, []);
+
+	const saveTolocal = useCallback((data) => {
+		// Convert Vector3 objects to plain objects for serialization
+		const serializablePoints = data.map((vector) => ({
+			x: vector.x,
+			y: vector.y,
+			z: vector.z,
+		}));
+		localStorage.setItem(
+			"editableConveyorBeltPoints",
+			JSON.stringify(serializablePoints),
+		);
+	}, []);
+
+	useEffect(() => {
+		saveTolocal(points);
+	}, [points, saveTolocal]);
 
 	// Keep a reference to OrbitControls so we can disable it during transformation
 	const orbitControlsRef = useRef<any>(null);
@@ -113,6 +159,8 @@ function EditableConveyorBeltScene() {
 		},
 		[points],
 	);
+
+	const { scene } = useThree();
 
 	// Leva controls
 	const {
@@ -192,6 +240,40 @@ function EditableConveyorBeltScene() {
 					// Keep the same index
 				}
 			}),
+			downloadPathPoints: button(() => {
+				// Convert Vector3 objects to plain objects for serialization
+				const serializablePoints = points.map((vector) => ({
+					x: vector.x,
+					y: vector.y,
+					z: vector.z,
+				}));
+				// Create and download JSON file
+				const dataStr = JSON.stringify(serializablePoints, null, 2);
+				const dataUri = `data:application/json;charset=utf-8,${encodeURIComponent(dataStr)}`;
+				const exportFileDefaultName = `editable-conveyor-path-points.json`;
+				const linkElement = document.createElement("a");
+				linkElement.setAttribute("href", dataUri);
+				linkElement.setAttribute("download", exportFileDefaultName);
+				linkElement.click();
+			}),
+			downloadSceneAsGLB: button(() => {
+				// Implement GLB export functionality
+
+				const exporter = new GLTFExporter();
+				// Get scene object
+				if (scene) {
+					exporter.parse(
+						scene,
+						(result) => {
+							saveArrayBuffer(result, "editable.glb");
+						},
+						(error) => {
+							console.error("Error exporting scene:", error);
+						},
+						{ binary: true },
+					);
+				}
+			}),
 		},
 		[points, selectedPointIndex, generateNewPoint],
 	);
@@ -253,7 +335,6 @@ function EditableConveyorBeltScene() {
 				position={[0, -0.01, 0]}
 			/>
 
-			{/* Conveyor Belt */}
 			<ConveyorBelt
 				ref={conveyorRef}
 				curvePath={points}
@@ -347,6 +428,9 @@ export function EditableConveyorBeltExample() {
 					• Use the control panel to add/delete points
 				</p>
 				<p style={{ margin: "5px 0" }}>• Red sphere indicates selected point</p>
+				<p style={{ margin: "5px 0" }}>• Save/Load paths with localStorage</p>
+				<p style={{ margin: "5px 0" }}>• Download path points as JSON</p>
+				<p style={{ margin: "5px 0" }}>• Export scene as GLB file</p>
 			</div>
 
 			<Canvas
