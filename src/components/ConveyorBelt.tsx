@@ -320,8 +320,8 @@ export const ConveyorBelt = forwardRef<ConveyorBeltRef, ConveyorBeltProps>(
 						float pos = mod(vUv.y - speed, arrowSpacing);
 						
 						// 创建箭头形状 - 一个渐变的三角形
-						float arrow = 1.0 - smoothstep(0.0, arrowLength, pos);
-						arrow *= smoothstep(arrowLength, 0.0, pos - arrowLength);
+						float arrow = smoothstep(0.0, arrowLength, pos);
+						arrow *= smoothstep(arrowLength, 1.0, pos - arrowLength);
 						
 						// 基础颜色和箭头颜色混合
 						vec3 finalColor = mix(color * 0.2, color, arrow);
