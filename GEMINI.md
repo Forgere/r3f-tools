@@ -15,7 +15,7 @@ The library is built with performance in mind, targeting large-scale 3D scenes, 
 
 This is a library project managed with `npm` or `bun` scripts, primarily using `vite` for building and `TypeScript` for type checking. You can use either `npm` or `bun` to run these commands.
 
-*   **Install Dependencies**: `npm install` or `bun install`
+*   **Install Dependencies**: `bun install` or `bun install`
 *   **Build Library**: `npm run build` or `bun run build` (Outputs to `dist/`)
 *   **Development Build (Watch)**: `npm run dev` or `bun run dev`
 *   **Lint Code**: `npm run lint` or `bun run lint`

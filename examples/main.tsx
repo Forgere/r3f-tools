@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Link, Route, Routes } from "react-router-dom";
 import { AnimatedInstancesExample } from "./AnimatedInstancesExample";
 import { ConveyorBeltExample } from "./ConveyorBeltExample";
+import { EditableConveyorBeltExample } from "./EditableConveyorBeltExample";
 import GSAPAnimationExample from "./GSAPAnimationExample";
 import PathAnimationExample from "./PathAnimationExample";
 
@@ -44,6 +45,16 @@ function App() {
 						Conveyor Belt
 					</Link>
 					<Link
+						to="/editable-conveyor-belt"
+						style={{
+							color: "white",
+							textDecoration: "none",
+							padding: "5px 10px",
+						}}
+					>
+						Editable Conveyor Belt
+					</Link>
+					<Link
 						to="/gsap-animation"
 						style={{
 							color: "white",
@@ -69,6 +80,10 @@ function App() {
 					<Routes>
 						<Route path="/" element={<AnimatedInstancesExample />} />
 						<Route path="/conveyor-belt" element={<ConveyorBeltExample />} />
+						<Route
+							path="/editable-conveyor-belt"
+							element={<EditableConveyorBeltExample />}
+						/>
 						<Route path="/gsap-animation" element={<GSAPAnimationExample />} />
 						<Route path="/path-animation" element={<PathAnimationExample />} />
 					</Routes>
