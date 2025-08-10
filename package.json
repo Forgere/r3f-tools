@@ -74,6 +74,7 @@
 		"vite-plugin-dts": "^4.5.4"
 	},
 	"dependencies": {
+		"@react-three/rapier": "^2.1.0",
 		"gsap": "^3.13.0",
 		"leva": "^0.10.0",
 		"three-stdlib": "^2.36.0"
