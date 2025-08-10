@@ -5,6 +5,7 @@ import { ConveyorBeltExample } from "./ConveyorBeltExample";
 import { EditableConveyorBeltExample } from "./EditableConveyorBeltExample";
 import GSAPAnimationExample from "./GSAPAnimationExample";
 import PathAnimationExample from "./PathAnimationExample";
+import { PhysicsConveyorBeltExample } from "./PhysicsConveyorBeltExample";
 
 function App() {
 	return (
@@ -74,6 +75,16 @@ function App() {
 					>
 						Path Animation
 					</Link>
+					<Link
+						to="/physics-conveyor-belt"
+						style={{
+							color: "white",
+							textDecoration: "none",
+							padding: "5px 10px",
+						}}
+					>
+						Physics Conveyor Belt
+					</Link>
 				</nav>
 
 				<div style={{ paddingTop: "60px" }}>
@@ -86,6 +97,10 @@ function App() {
 						/>
 						<Route path="/gsap-animation" element={<GSAPAnimationExample />} />
 						<Route path="/path-animation" element={<PathAnimationExample />} />
+						<Route
+							path="/physics-conveyor-belt"
+							element={<PhysicsConveyorBeltExample />}
+						/>
 					</Routes>
 				</div>
 			</div>

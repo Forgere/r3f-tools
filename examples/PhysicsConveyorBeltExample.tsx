@@ -12,7 +12,7 @@ import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { GLTFExporter } from "three-stdlib";
-import { PhysicsCart } from "../src/components/PhysicsCart";
+import { PhysicsCar } from "../src/components/PhysicsCar";
 import { PhysicsConveyorBelt } from "../src/components/PhysicsConveyorBelt";
 
 // Helper function to create a default path
@@ -44,11 +44,7 @@ const EditPoint: React.FC<{
 	};
 
 	return (
-		<mesh
-			ref={meshRef}
-			onPointerDown={handlePointerDown}
-			position={point}
-		>
+		<mesh ref={meshRef} onPointerDown={handlePointerDown} position={point}>
 			<sphereGeometry args={[0.1, 16, 16]} />
 			<meshStandardMaterial
 				color={isSelected ? 0xff0000 : 0x00ff00}
@@ -168,8 +164,6 @@ function PhysicsConveyorBeltScene() {
 		segments,
 		showWireframe,
 		showPath,
-		cartMass,
-		cartSpeed,
 	} = useControls(
 		{
 			rollerSpacing: { value: 0.8, min: 0.2, max: 2.0, step: 0.1 },
@@ -179,9 +173,7 @@ function PhysicsConveyorBeltScene() {
 			rollerRadius: { value: 0.08, min: 0.02, max: 0.2, step: 0.01 },
 			segments: { value: 16, min: 8, max: 100, step: 1 },
 			showWireframe: false,
-			showPath: false,
-			cartMass: { value: 1, min: 0.1, max: 10, step: 0.1 },
-			cartSpeed: { value: 0.5, min: 0, max: 2, step: 0.1 },
+			showPath: true,
 			resetPath: button(() => {
 				console.log("Reset path clicked");
 				setPoints(createDefaultPath());
@@ -302,7 +294,7 @@ function PhysicsConveyorBeltScene() {
 			/>
 
 			{/* Physics world */}
-			<Physics gravity={[0, -9.81, 0]}>
+			<Physics gravity={[0, -9.81, 0]} debug>
 				<PhysicsConveyorBelt
 					curvePath={points}
 					rollerSpacing={rollerSpacing}
@@ -317,12 +309,7 @@ function PhysicsConveyorBeltScene() {
 					showPath={showPath}
 				/>
 
-				<PhysicsCart
-					curvePath={points}
-					mass={cartMass}
-					speed={cartSpeed}
-					initialPosition={0}
-				/>
+				<PhysicsCar />
 			</Physics>
 
 			{/* Editable Points */}
@@ -403,8 +390,11 @@ export function PhysicsConveyorBeltExample() {
 					• Use the control panel to add/delete points
 				</p>
 				<p style={{ margin: "5px 0" }}>• Red sphere indicates selected point</p>
-				<p style={{ margin: "5px 0" }}>• Physics cart moves along the track</p>
-				<p style={{ margin: "5px 0" }}>• Adjust cart mass and speed in controls</p>
+				<p style={{ margin: "5px 0" }}>• Drive the car with WASD keys</p>
+				<p style={{ margin: "5px 0" }}>• Car has physics-based movement</p>
+				<p style={{ margin: "5px 0" }}>
+					• Adjust conveyor properties in controls
+				</p>
 				<p style={{ margin: "5px 0" }}>• Save/Load paths with localStorage</p>
 			</div>
 
