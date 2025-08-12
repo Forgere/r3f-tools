@@ -6,7 +6,7 @@ import {
 	TransformControls,
 } from "@react-three/drei";
 import { Canvas, useThree } from "@react-three/fiber";
-import { Physics } from "@react-three/rapier";
+import { Physics, RigidBody } from "@react-three/rapier";
 import { button, useControls } from "leva";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -308,6 +308,13 @@ function PhysicsConveyorBeltScene() {
 					segments={segments}
 					showPath={showPath}
 				/>
+
+				<RigidBody type="fixed" colliders="cuboid" friction={1}>
+					<mesh receiveShadow>
+						<boxGeometry args={[50, 1, 50]} /> {/* 宽50，厚1，高50 */}
+						<meshStandardMaterial color="#2ecc71" />
+					</mesh>
+				</RigidBody>
 
 				<PhysicsCar />
 			</Physics>

@@ -1,3 +1,4 @@
+import { useFrame } from "@react-three/fiber";
 import { RigidBody, useRevoluteJoint } from "@react-three/rapier";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
@@ -118,13 +119,99 @@ export function PhysicsCar({
 		[0, 0, 1], // rotation axis (X axis for wheel rotation)
 	]);
 
+	useFrame((_, delta) => {
+	if (!carBodyRef.current) return;
+
+	const carBody = carBodyRef.current;
+	const velocity = carBody.linvel();
+	const currentSpeed = Math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z);
+
+	// ========== 1. 前轮转向 ==========
+	// 存储当前转向角（用 useRef 避免频繁重渲染）
+	const maxAngle = carProperties.maxSteeringAngle;
+	if (!carBodyRef.current.steeringAngle) carBodyRef.current.steeringAngle = 0;
+
+	// A/D 调整转向角度
+	if (keys.a) {
+		carBodyRef.current.steeringAngle = Math.min(
+			carBodyRef.current.steeringAngle + carProperties.steeringSpeed * delta,
+			maxAngle
+		);
+	} else if (keys.d) {
+		carBodyRef.current.steeringAngle = Math.max(
+			carBodyRef.current.steeringAngle - carProperties.steeringSpeed * delta,
+			-maxAngle
+		);
+	} else {
+		// 松开方向键时回正
+		if (carBodyRef.current.steeringAngle > 0) {
+			carBodyRef.current.steeringAngle = Math.max(carBodyRef.current.steeringAngle - carProperties.steeringSpeed * delta, 0);
+		} else if (carBodyRef.current.steeringAngle < 0) {
+			carBodyRef.current.steeringAngle = Math.min(carBodyRef.current.steeringAngle + carProperties.steeringSpeed * delta, 0);
+		}
+	}
+
+	// 应用转向到前轮的朝向
+	[frontLeftWheelRef, frontRightWheelRef].forEach((wheelRef) => {
+		if (wheelRef.current) {
+			wheelRef.current.setRotation(
+				new THREE.Quaternion().setFromEuler(new THREE.Euler(0, carBodyRef.current.steeringAngle, 0))
+			);
+		}
+	});
+
+	// ========== 2. 驱动轮（后轮）推动车身 ==========
+	let targetForce = 0;
+	console.log(keys)
+	if (keys.w && currentSpeed < carProperties.maxSpeed) {
+		targetForce = carProperties.maxEngineForce;
+	}
+	if (keys.s && currentSpeed < carProperties.maxSpeed) {
+		targetForce = -carProperties.maxEngineForce * 0.6; // 倒车更慢
+	}
+
+	// 自动刹车
+	if (!keys.w && !keys.s) {
+		const brakeForce = carProperties.maxBrakeForce * 0.15;
+		if (currentSpeed > 0.1) {
+			const brakeVector = new THREE.Vector3(-velocity.x, 0, -velocity.z)
+				.normalize()
+				.multiplyScalar(brakeForce);
+			carBody.addForce({ x: brakeVector.x, y: 0, z: brakeVector.z }, true);
+		}
+	}
+
+	// 平滑推力
+	if (targetForce !== 0) {
+		// 后轮朝向（受前轮转向影响的车身朝向）
+		const rotation = carBody.rotation();
+		const carDirection = new THREE.Vector3(0, 0, 1).applyQuaternion(
+			new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w)
+		).normalize();
+
+		const smoothForce = targetForce * delta * 50;
+		const forceVector = carDirection.clone().multiplyScalar(smoothForce);
+
+		// 推力作用在后轮位置
+		const rearLeftPos = new THREE.Vector3(-0.5, 0, -0.3);
+		const rearRightPos = new THREE.Vector3(0.5, 0, -0.3);
+
+		carBody.addForceAtPoint({ x: forceVector.x, y: 0, z: forceVector.z }, rearLeftPos, true);
+		carBody.addForceAtPoint({ x: forceVector.x, y: 0, z: forceVector.z }, rearRightPos, true);
+	}
+
+	// ========== 3. 下压力 ==========
+	carBody.addForce({ x: 0, y: -carProperties.downForce, z: 0 }, true);
+});
+
+
 	return (
-		<group position={position} ref={carRef}>
+		<group ref={carRef}>
 			{/* Main car body */}
 			<RigidBody
 				ref={carBodyRef}
 				colliders="cuboid"
-				restitution={0.01} // Reduced bounciness
+				restitution={0.1} // Reduced bounciness
 				friction={carProperties.friction}
 				mass={mass * 0.6} // 60% of total mass
 				linearDamping={0.15} // Slightly increased damping
@@ -147,9 +234,9 @@ export function PhysicsCar({
 				ref={frontLeftWheelRef}
 				position={[-0.5, 0, 0.3]}
 				colliders="ball"
-				restitution={0.01}
+				restitution={0.1}
 				friction={carProperties.friction}
-				mass={mass } // 10% of total mass
+				mass={mass * 0.1} // 10% of total mass
 				enabledRotations={[false, false, true]} // Only allow rotation around X axis
 			>
 				<mesh
@@ -166,9 +253,9 @@ export function PhysicsCar({
 				ref={frontRightWheelRef}
 				position={[0.5, 0, 0.3]}
 				colliders="ball"
-				restitution={0.01}
+				restitution={0.1}
 				friction={carProperties.friction}
-				mass={mass} // 10% of total mass
+				mass={mass * 0.1} // 10% of total mass
 				enabledRotations={[false, false, true]} // Only allow rotation around X axis
 			>
 				<mesh
@@ -185,9 +272,9 @@ export function PhysicsCar({
 				ref={rearLeftWheelRef}
 				position={[-0.5, 0, -0.3]}
 				colliders="ball"
-				restitution={0.01}
+				restitution={0.1}
 				friction={carProperties.friction}
-				mass={mass} // 10% of total mass
+				mass={mass * 0.1} // 10% of total mass
 				enabledRotations={[false, false, true]} // Only allow rotation around X axis
 			>
 				<mesh
@@ -204,9 +291,9 @@ export function PhysicsCar({
 				ref={rearRightWheelRef}
 				position={[0.5, 0, -0.3]}
 				colliders="ball"
-				restitution={0.01}
+				restitution={0.1}
 				friction={carProperties.friction}
-				mass={mass} // 10% of total mass
+				mass={mass * 0.1} // 10% of total mass
 				enabledRotations={[false, false, true]} // Only allow rotation around X axis
 			>
 				<mesh
