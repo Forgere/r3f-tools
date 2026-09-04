@@ -22,6 +22,52 @@ pnpm add r3f-tools
 
 ## Usage
 
+### Factory track graph and device plugins
+
+`TrackGraph` separates physical ownership from geometry: a visual crossing
+does not connect two devices. Define an explicit `handoff` node only where
+material is permitted to move between them. `DeviceRuntime.transfer()` asks the
+receiving device plugin whether it can accept that material.
+
+```ts
+const graph = new TrackGraph()
+graph.addDevice({ id: "infeed", kind: "roller-conveyor" })
+graph.addDevice({ id: "sorter", kind: "sorter" })
+
+graph.addNode({
+  id: "handoff",
+  pose: makePose(new THREE.Vector3(0, 0, 0), new THREE.Vector3(1, 0, 0)),
+  handoff: { fromDeviceId: "infeed", toDeviceId: "sorter" },
+})
+```
+
+Use `DevicePluginRegistry` for per-device operating behaviour and
+`SegmentPluginRegistry` for custom segment geometry. Both registries isolate a
+plugin error to the affected `deviceId`; the former falls back to built-in
+stopped/faulted behaviour and the latter falls back to a straight segment.
+Subscribe to `onPluginDegraded` to surface the fault in your UI.
+
+For a transfer point that would otherwise leave an exposed crossing gap, use
+the built-in `VerticalLift`. Its enclosed graph edge should use
+`visible: false`: it remains in the material route while the lift, not an
+exposed roller bed, renders the mechanical transfer.
+
+`TrackRenderer` uses the editable conveyor visual model by default. Use
+`showRollers={false}` to inspect only frames or `showPath` to reveal route
+lines; `showPaths` remains supported as a deprecated alias.
+
+```ts
+const segmentPlugins = new SegmentPluginRegistry({
+  onPluginDegraded: ({ deviceId, error }) => reportDeviceFault(deviceId, error),
+})
+segmentPlugins.register({
+  kind: "vendor-roller-bed",
+  generateGeometry: createVendorRollerBed,
+})
+
+// Pass segmentPlugins to <TrackRenderer graph={graph} ... />.
+```
+
 ### InstancedMeshPool
 
 A performance-oriented component for rendering large numbers of similar objects using Three.js InstancedMesh with automatic batching.
