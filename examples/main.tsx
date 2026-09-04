@@ -6,6 +6,7 @@ import { EditableConveyorBeltExample } from "./EditableConveyorBeltExample";
 import { FactoryLayoutExample } from "./FactoryLayoutExample";
 import GSAPAnimationExample from "./GSAPAnimationExample";
 import PathAnimationExample from "./PathAnimationExample";
+import { VividFactoryConveyorExample } from "./VividFactoryConveyorExample";
 
 function App() {
 	return (
@@ -85,6 +86,16 @@ function App() {
 					>
 						Path Animation
 					</Link>
+					<Link
+						to="/vivid-factory"
+						style={{
+							color: "white",
+							textDecoration: "none",
+							padding: "5px 10px",
+						}}
+					>
+						Vivid Factory
+					</Link>
 				</nav>
 
 				<div style={{ paddingTop: "60px" }}>
@@ -97,8 +108,12 @@ function App() {
 						/>
 						<Route path="/factory-layout" element={<FactoryLayoutExample />} />
 						<Route path="/gsap-animation" element={<GSAPAnimationExample />} />
-						<Route path="/path-animation" element={<PathAnimationExample />} />
-					</Routes>
+					<Route path="/path-animation" element={<PathAnimationExample />} />
+					<Route
+						path="/vivid-factory"
+						element={<VividFactoryConveyorExample />}
+					/>
+				</Routes>
 				</div>
 			</div>
 		</BrowserRouter>
