@@ -2,8 +2,44 @@
 
 A collection of useful components and utilities for React Three Fiber applications, designed to improve performance and simplify common patterns.
 
+## Project Goal
+
+The north star of `r3f-tools` is to grow from R3F performance components into
+a **factory world-model toolkit** — one that can stand up a complex logistics
+factory in the browser and make that world useful beyond visualization:
+
+- **Effective simulation** — material flow, queueing, backpressure, capacity,
+  inspection and routing are modelled by a renderer-independent kernel
+  (`src/sim/`), not by ad-hoc per-component animation.
+- **AI training data** — every spawn, transfer, inspection and blockage is a
+  structured event on an immutable log, and frame deltas are plain
+  serializable data, so episodes can be recorded, replayed and exported as
+  training / evaluation data.
+- **AI-replicable, AI-modifiable production lines** — the whole factory is
+  declarative data (device definitions + parameters), so an agent can read a
+  layout, propose a modification, validate it against constraints, and drop
+  it back into the running world.
+- **Adaptation to varying, constrained conditions** — three data modes
+  (`sim` / `external` / `hybrid`) and four external signal contracts
+  (`pose` / `progress` / `entry` / `span`) keep the world coherent when only
+  some devices have real data or when feeds differ in fidelity.
+- **Clear boundaries** — rendering, simulation, device behaviour and segment
+  geometry are separate layers with explicit contracts (`FrameDelta`, plugin
+  registries); a faulting plugin degrades one device, never the scene.
+- **Plugin-based** — device renderers, segment geometry and device control
+  behaviour are swappable plugins, so a vendor machine model or a custom PLC
+  rule drops in at runtime without touching the core.
+
+Current focus on closing the gap: world (de)serialization + machine-readable
+layout validation (so AI can read/write production lines), deterministic
+seeded simulation + event-log persistence (so training data is reproducible),
+and unifying the `src/core` track-graph world with the `src/sim` kernel.
+
 ## Features
 
+- **FactorySim**: data-driven factory simulation kernel — pure TypeScript with zero three.js dependencies, structured event log, frame-delta rendering contract, and sim / external / hybrid data modes
+- **Device & segment plugins**: hot-swappable device renderers, segment geometry generators, and device behaviour plugins with per-device fault isolation
+- **ConveyorBelt & track system**: editable conveyors, track-graph routing, lift-and-transfer devices
 - **InstancedMeshPool**: High-performance instanced mesh rendering with dynamic batching
 - **GSAPAnimator**: GSAP-powered animation utility for Three.js Object3D instances
 - TypeScript support
