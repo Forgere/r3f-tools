@@ -25,6 +25,8 @@ const IDLE_STATE: DeviceVisualState = {
 	lift: 0,
 	phase: "idle",
 	occupied: false,
+	fill: 0,
+	lastVerdict: undefined,
 };
 
 export function normalizeDeviceState(
@@ -38,6 +40,8 @@ export function normalizeDeviceState(
 		lift: delta.lift ?? 0,
 		phase: delta.phase ?? "idle",
 		occupied: delta.occupied ?? false,
+		fill: delta.fill ?? 0,
+		lastVerdict: delta.lastVerdict,
 	};
 }
 

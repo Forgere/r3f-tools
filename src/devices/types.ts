@@ -45,6 +45,10 @@ export interface DeviceVisualState {
 	lift: number;
 	phase: JunctionPhase;
 	occupied: boolean;
+	/** Buffer fill ratio 0…1. */
+	fill: number;
+	/** Last verdict stamped by an inspector ("ok" / "ng" / undefined). */
+	lastVerdict?: string;
 }
 
 export interface DeviceRendererProps {

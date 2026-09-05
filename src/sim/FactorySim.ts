@@ -1,16 +1,26 @@
 import { buildSimPath, sampleSimPath, type SimPath } from "./pathMath";
 import type {
+	BufferDef,
+	DataMode,
 	DeviceStateDelta,
+	ExternalContract,
+	ExternalDeviceFrame,
+	ExternalItemState,
+	ExternalSignal,
 	FrameDelta,
+	InspectorDef,
 	ItemMoveDelta,
+	ItemRestyleDelta,
 	ItemSpawnDelta,
 	JunctionDef,
 	JunctionLiftConfig,
 	JunctionPhase,
+	SimAttrValue,
 	SimDeviceDef,
 	SimEvent,
 	SimItemSnapshot,
 	SimItemType,
+	SimPoint,
 	SimStats,
 	SinkDef,
 	SourceDef,
@@ -20,12 +30,28 @@ import type {
 /**
  * Data-driven factory simulation.
  *
- * The world is a device graph (sources → transports → junctions → sinks).
- * Every frame `tick(delta)` advances the world and returns a `FrameDelta`
- * containing ONLY what changed: spawned items, moved items, removed items
- * and device-state changes. Renderers apply the delta and never run logic —
- * this is what makes large-scale factory rendering feasible (the sim itself
- * can move to a Worker without touching any rendering code).
+ * The world is a device graph (sources → transports → junctions / inspectors
+ * → buffers / sinks). Every frame `tick(delta)` advances the world and returns
+ * a `FrameDelta` containing ONLY what changed: spawned items, moved items,
+ * removed items, restyled items and device-state changes. Renderers apply the
+ * delta and never run logic — this is what makes large-scale factory rendering
+ * feasible (the sim itself can move to a Worker without touching any rendering
+ * code).
+ *
+ * ## Data source modes (数据驱动三种模式)
+ *
+ * A real digital twin rarely has instrumentation on every device, so the
+ * engine supports three modes — see `FactorySimOptions.worldMode` and
+ * `setWorldMode` / `setDeviceDataSource`:
+ *
+ * - `"sim"`      — every device is driven by the internal kinematics engine.
+ * - `"external"` — the whole world is fed from outside (MES / SCADA / PLC). The
+ *                  sim generates nothing and only diffs the incoming frames
+ *                  into `FrameDelta`s ("接受数据").
+ * - `"hybrid"`   — per-device `dataSource`. Some devices run the sim, others are
+ *                  fed externally. Items crossing a sim↔external boundary are
+ *                  handed over so the renderer keeps showing them under the same
+ *                  id ("应对工厂有些设备没有数据的情况").
  *
  * All transitions are appended to a bounded event log (后台记录), exposed via
  * `getRecentEvents()` for HUDs, analytics or persistence.
@@ -38,10 +64,22 @@ interface InternalItem {
 	deviceId: string;
 	/** Arc-length distance along the current transport path. */
 	distance: number;
+	/**
+	 * Process attributes that travel with the item. Devices read and write
+	 * them freely (inspection verdicts, batch numbers, weight classes…), and
+	 * routing can be keyed on any of them via `JunctionDef.routeBy`.
+	 */
+	attrs: Record<string, SimAttrValue>;
 	/** Set when the renderer must (re)write this item's transform. */
 	needsWrite: boolean;
 	/** Anti-spam flag so a blocked item logs only once per blocking episode. */
 	blockedNotified: boolean;
+	/**
+	 * Authority flag: when true the item's position comes from the external
+	 * feed (`this.external`) rather than internal kinematics. Set on a
+	 * sim→external hand-off so the renderer keeps showing the item seamlessly.
+	 */
+	held?: boolean;
 }
 
 interface TransportRT {
@@ -54,7 +92,7 @@ interface TransportRT {
 	baseSpeed: number;
 }
 
-/** Where an item sits relative to the junction centre, per cycle phase. */
+/** Where an item sits relative to the junction/inspector centre, per phase. */
 interface JunctionOffset {
 	x: number;
 	y: number;
@@ -62,14 +100,7 @@ interface JunctionOffset {
 	heading: number;
 }
 
-interface JunctionRT {
-	kind: "junction";
-	def: JunctionDef;
-	occupant: InternalItem | null;
-	remaining: number;
-	routeIndex: number;
-	running: boolean;
-	/** Lift-and-transfer cycle (顶升移栽). */
+interface CycleRT {
 	phase: JunctionPhase;
 	/** Elapsed time inside the current phase, seconds. */
 	phaseT: number;
@@ -80,6 +111,38 @@ interface JunctionRT {
 	/** Offset where the item leaves the deck (centre → edge during transfer). */
 	exit: JunctionOffset;
 	targetId: string | null;
+}
+
+interface JunctionRT extends CycleRT {
+	kind: "junction";
+	def: JunctionDef;
+	occupant: InternalItem | null;
+	remaining: number;
+	routeIndex: number;
+	running: boolean;
+}
+
+interface InspectorRT extends CycleRT {
+	kind: "inspector";
+	def: InspectorDef;
+	occupant: InternalItem | null;
+	/** Verdict for the current occupant; published as device state. */
+	verdict: string | null;
+	running: boolean;
+	/** Verdict tally for the whole run, e.g. `{ ok: 41, ng: 9 }`. */
+	tally: Record<string, number>;
+}
+
+interface BufferRT {
+	kind: "buffer";
+	def: BufferDef;
+	/** Held items, in slot order. Slot index = position in this array. */
+	stored: InternalItem[];
+	/** Seconds the rack has been non-empty; drives `drainAfter`. */
+	timer: number;
+	/** Latches so `buffer:full` is logged once per fill, not every tick. */
+	fullNotified: boolean;
+	drainedCount: number;
 }
 
 interface SourceRT {
@@ -95,16 +158,44 @@ interface SinkRT {
 	consumed: number;
 }
 
-type DeviceRT = TransportRT | JunctionRT | SourceRT | SinkRT;
+type DeviceRT =
+	| TransportRT
+	| JunctionRT
+	| InspectorRT
+	| BufferRT
+	| SourceRT
+	| SinkRT;
+
+/** Devices that run the shared dwell → lift → transfer → release cycle. */
+type TransferLikeRT = JunctionRT | InspectorRT;
 
 export interface FactorySimOptions {
 	/** Ring-buffer size for the event log. Default 250. */
 	eventLogSize?: number;
 	/** Default min item spacing on transports. Default 0.45. */
 	defaultMinGap?: number;
+	/**
+	 * Global data-source mode. Default `"sim"`.
+	 * - `"sim"`      — internal kinematics drive every device.
+	 * - `"external"` — the world is fed entirely from `ingestExternalFrame`.
+	 * - `"hybrid"`   — each device's mode comes from `deviceSources` (or
+	 *                 defaults to `"sim"`), so sim and external devices coexist.
+	 */
+	worldMode?: DataMode;
+	/**
+	 * Per-device override used in `"hybrid"` mode: device id →
+	 * `"sim"` (run the engine) or `"external"` (fed from outside).
+	 */
+	deviceSources?: Record<string, "sim" | "external">;
 }
 
 const ZERO_OFFSET: JunctionOffset = { x: 0, y: 0, z: 0, heading: 0 };
+
+interface SimPointLike {
+	x: number;
+	y: number;
+	z: number;
+}
 
 function pathStart(path: SimPath): SimPointLike {
 	const p = path.points[0];
@@ -123,10 +214,8 @@ function offsetBetween(from: SimPointLike, to: SimPointLike): JunctionOffset {
 	return { x: dx, y: dy, z: dz, heading: Math.atan2(dx, dz) };
 }
 
-interface SimPointLike {
-	x: number;
-	y: number;
-	z: number;
+function clamp(v: number, lo: number, hi: number): number {
+	return v < lo ? lo : v > hi ? hi : v;
 }
 
 function liftTiming(lift: JunctionLiftConfig | undefined): {
@@ -143,15 +232,47 @@ function liftTiming(lift: JunctionLiftConfig | undefined): {
 	};
 }
 
-/**
- * Ordered list of a junction's outfeeds. Index order matches the
- * `routeIndex` the device publishes, so a renderer can map a route index to
- * a physical outlet without knowing the routing rule.
- */
+/** Ordered list of a junction's outfeeds (alternating routing). */
 function junctionOutfeeds(def: JunctionDef): string[] {
 	if (def.alternate) return def.alternate.devices;
 	if (def.routes) return [...new Set(Object.values(def.routes))];
 	return [];
+}
+
+/** Total slots a buffer can hold. */
+export function bufferCapacity(def: BufferDef): number {
+	const columns = Math.max(1, Math.floor(def.columns));
+	const rows = Math.max(1, Math.floor(def.rows ?? 1));
+	const layers = Math.max(1, Math.floor(def.layers ?? 1));
+	return columns * rows * layers;
+}
+
+/**
+ * World position of a buffer slot. Slots fill along columns, then rows, then
+ * layers — the same way a real rack is loaded.
+ */
+export function bufferSlotPosition(def: BufferDef, index: number): SimPoint {
+	const columns = Math.max(1, Math.floor(def.columns));
+	const rows = Math.max(1, Math.floor(def.rows ?? 1));
+	const plane = columns * rows;
+	const [sx, sy, sz] = def.spacing ?? [0.32, 0.2, 0.32];
+
+	const layer = Math.floor(index / plane) % Math.max(1, def.layers ?? 1);
+	const within = ((index % plane) + plane) % plane;
+	const column =
+		def.order === "column-major"
+			? Math.floor(within / rows) % columns
+			: within % columns;
+	const row =
+		def.order === "column-major"
+			? within % rows
+			: Math.floor(within / columns) % rows;
+
+	return {
+		x: def.position.x + column * sx,
+		y: def.position.y + layer * sy,
+		z: def.position.z + row * sz,
+	};
 }
 
 function pickItemType(types: SimItemType[]): SimItemType | undefined {
@@ -177,6 +298,24 @@ export class FactorySim {
 	private readonly dirtyDevices = new Set<string>();
 	/** Latest published state per device, so renderers can poll at any time. */
 	private readonly liveStates = new Map<string, DeviceStateDelta>();
+
+	/** Global data-source mode (sim / external / hybrid). */
+	private worldMode: DataMode;
+	/** Per-device override, used in hybrid mode. */
+	private readonly deviceSources = new Map<string, "sim" | "external">();
+	/**
+	 * Per-device external-signal contract (what the feed is capable of
+	 * supplying). Drives how `runExternal` advances `item.distance` and how
+	 * `collectMoved` resolves world pose. See §14 in factory-conveyor-plan.md.
+	 */
+	private readonly contracts = new Map<string, ExternalContract>();
+	/**
+	 * External feed: deviceId → (itemId → authoritative state). Populated by
+	 * `ingestExternalFrame`. Items whose `held` flag is set read their position
+	 * from here instead of from internal kinematics.
+	 */
+	private readonly external = new Map<string, Map<number, ExternalItemState>>();
+
 	private globalSpeed = 1;
 	private sourceRate = 1;
 
@@ -188,6 +327,10 @@ export class FactorySim {
 	constructor(defs: SimDeviceDef[], options: FactorySimOptions = {}) {
 		this.eventLogSize = options.eventLogSize ?? 250;
 		this.defaultMinGap = options.defaultMinGap ?? 0.45;
+		this.worldMode = options.worldMode ?? "sim";
+		for (const [id, src] of Object.entries(options.deviceSources ?? {})) {
+			this.deviceSources.set(id, src);
+		}
 
 		for (const def of defs) {
 			if (this.devices.has(def.id)) {
@@ -228,6 +371,32 @@ export class FactorySim {
 						targetId: null,
 					});
 					break;
+				case "inspector":
+					this.devices.set(def.id, {
+						kind: "inspector",
+						def,
+						occupant: null,
+						verdict: null,
+						running: true,
+						tally: {},
+						phase: "idle",
+						phaseT: 0,
+						lift: 0,
+						entry: ZERO_OFFSET,
+						exit: ZERO_OFFSET,
+						targetId: null,
+					});
+					break;
+				case "buffer":
+					this.devices.set(def.id, {
+						kind: "buffer",
+						def,
+						stored: [],
+						timer: 0,
+						fullNotified: false,
+						drainedCount: 0,
+					});
+					break;
 				case "sink":
 					this.devices.set(def.id, { kind: "sink", def, consumed: 0 });
 					break;
@@ -235,6 +404,72 @@ export class FactorySim {
 		}
 
 		this.validateTopology();
+	}
+
+	// ---------------------------------------------------------------------------
+	// Data-source mode control (三种数据模式).
+	// ---------------------------------------------------------------------------
+
+	getWorldMode(): DataMode {
+		return this.worldMode;
+	}
+
+	/**
+	 * Monotonic sim clock (seconds). External feeders read this so entry/span/
+	 * progress signals share the sim's time base — `tick` clamps `dt` to 0.25 s,
+	 * so wall-clock deltas would drift from the sim during frame hitches.
+	 */
+	getElapsed(): number {
+		return this.time;
+	}
+
+	/** Switch the global data-source mode. Marks every device dirty so renderers re-read state. */
+	setWorldMode(mode: DataMode): void {
+		this.worldMode = mode;
+		for (const id of this.devices.keys()) this.dirtyDevices.add(id);
+		this.pushEvent({ type: "device:state", detail: `world-mode → ${mode}` });
+	}
+
+	/** Set a single device's data source (used in hybrid mode). */
+	setDeviceDataSource(
+		deviceId: string,
+		source: "sim" | "external",
+		contract?: ExternalContract,
+	): void {
+		this.deviceSources.set(deviceId, source);
+		if (contract) this.contracts.set(deviceId, contract);
+		this.dirtyDevices.add(deviceId);
+	}
+
+	getDeviceDataSource(deviceId: string): "sim" | "external" {
+		return this.effMode(deviceId);
+	}
+
+	/** Effective external contract for a device. Defaults to world pose (back-compat). */
+	private effContract(deviceId: string): ExternalContract {
+		return this.contracts.get(deviceId) ?? { signal: "pose", frame: "world" };
+	}
+
+	/**
+	 * Feed externally-supplied item states into the world. Called every frame
+	 * in `"external"` mode and for external devices in `"hybrid"` mode. The sim
+	 * diffs the feed against the previous frame to produce moved/spawned/removed
+	 * deltas — it never reinterprets or predicts the data.
+	 */
+	ingestExternalFrame(frames: ExternalDeviceFrame[]): void {
+		for (const frame of frames) {
+			const map = new Map<number, ExternalItemState>();
+			for (const st of frame.items) map.set(st.itemId, st);
+			this.external.set(frame.deviceId, map);
+			this.dirtyDevices.add(frame.deviceId);
+		}
+	}
+
+	/** Effective data source for a device given the global mode + overrides. */
+	private effMode(deviceId: string): "sim" | "external" {
+		if (this.worldMode === "sim") return "sim";
+		if (this.worldMode === "external") return "external";
+		return this.deviceSources.get(deviceId) ?? "sim";
 	}
 
 	// ---------------------------------------------------------------------------
@@ -247,7 +482,7 @@ export class FactorySim {
 
 	setRunning(deviceId: string, running: boolean): void {
 		const rt = this.requireDevice(deviceId);
-		if (rt.kind === "sink") return;
+		if (rt.kind === "sink" || rt.kind === "buffer") return;
 		rt.running = running;
 		this.dirtyDevices.add(deviceId);
 	}
@@ -281,8 +516,12 @@ export class FactorySim {
 
 	getStats(): SimStats {
 		const throughput: Record<string, number> = {};
+		const stored: Record<string, number> = {};
+		const verdicts: Record<string, Record<string, number>> = {};
 		for (const rt of this.devices.values()) {
 			if (rt.kind === "sink") throughput[rt.def.id] = rt.consumed;
+			else if (rt.kind === "buffer") stored[rt.def.id] = rt.stored.length;
+			else if (rt.kind === "inspector") verdicts[rt.def.id] = { ...rt.tally };
 		}
 		return {
 			activeItems: this.items.size,
@@ -290,6 +529,8 @@ export class FactorySim {
 			totalConsumed: this.totalConsumed,
 			blocked: this.blockedCount,
 			throughput,
+			stored,
+			verdicts,
 		};
 	}
 
@@ -301,6 +542,7 @@ export class FactorySim {
 			colorIndex: item.colorIndex,
 			deviceId: item.deviceId,
 			distance: item.distance,
+			attrs: item.attrs,
 		}));
 	}
 
@@ -312,12 +554,19 @@ export class FactorySim {
 		const dt = Math.min(Math.max(deltaSeconds, 0), 0.25);
 		const spawned: ItemSpawnDelta[] = [];
 		const removed: number[] = [];
+		const restyled: ItemRestyleDelta[] = [];
 
 		if (dt > 0) {
 			this.time += dt;
-			this.tickSources(dt, spawned);
-			this.tickTransports(dt, removed);
-			this.tickJunctions(dt, removed);
+			if (this.worldMode === "external") {
+				// Pure replay of the external feed — no internal kinematics.
+				this.runExternal(spawned, removed, restyled);
+			} else {
+				this.runSim(dt, spawned, removed, restyled);
+				if (this.worldMode === "hybrid") {
+					this.runExternal(spawned, removed, restyled);
+				}
+			}
 		}
 
 		return {
@@ -325,8 +574,190 @@ export class FactorySim {
 			spawned,
 			moved: this.collectMoved(),
 			removed,
+			restyled,
 			deviceStates: this.collectDeviceStates(),
 			stats: this.getStats(),
+		};
+	}
+
+	/** Internal kinematics for every device whose effective mode is "sim". */
+	private runSim(
+		dt: number,
+		spawned: ItemSpawnDelta[],
+		removed: number[],
+		restyled: ItemRestyleDelta[],
+	): void {
+		this.tickSources(dt, spawned);
+		this.tickTransports(dt, removed, restyled);
+		this.tickTransferLike(dt, removed, restyled);
+		this.tickBuffers(dt, removed);
+	}
+
+	/**
+	 * Diff the external feed into frame deltas. Mirrors each fed item into
+	 * `this.items` with `held = true` so `collectMoved` can read its position.
+	 *
+	 * Branches on the device's external contract (§14):
+	 * - `pose`     — world (or device-local→world) pose; resolved in collectMoved.
+	 * - `progress` — `distance = progress × path.length`; sampled in collectMoved.
+	 * - `entry`    — sim drives `distance` via its own speed×dt from `tEnter`.
+	 * - `span`     — `distance` linearly interpolated over `[tEnter, tExit]`.
+	 * Path-driven signals (progress/entry/span) REQUIRE the device to declare a
+	 * `path`; items reaching the path end are handed off to the next device.
+	 */
+	private runExternal(
+		spawned: ItemSpawnDelta[],
+		removed: number[],
+		restyled: ItemRestyleDelta[],
+	): void {
+		// Items handed off during this pass — skip them if the feed re-reports.
+		const handedOff = new Set<number>();
+
+		for (const [deviceId, map] of this.external) {
+			const contract = this.effContract(deviceId);
+			const rt = this.devices.get(deviceId);
+			const L = rt && rt.kind === "transport" ? rt.path.length : 0;
+
+			for (const st of map.values()) {
+				if (handedOff.has(st.itemId)) continue;
+
+				let item = this.items.get(st.itemId);
+				if (!item) {
+					item = {
+						id: st.itemId,
+						typeId: st.typeId,
+						colorIndex: st.colorIndex,
+						deviceId,
+						distance: 0,
+						attrs: { ...(st.attrs ?? {}) },
+						needsWrite: true,
+						blockedNotified: false,
+						held: true,
+					};
+					this.items.set(st.itemId, item);
+					spawned.push({
+						itemId: st.itemId,
+						typeId: st.typeId,
+						colorIndex: st.colorIndex,
+					});
+				} else {
+					item.held = true;
+					item.deviceId = deviceId;
+					if (item.colorIndex !== st.colorIndex) {
+						item.colorIndex = st.colorIndex;
+						restyled.push({ itemId: st.itemId, colorIndex: st.colorIndex });
+					}
+					item.attrs = { ...(st.attrs ?? {}) };
+					item.needsWrite = true;
+				}
+
+				// Pose signals are resolved in collectMoved; nothing to advance here.
+				if (contract.signal === "pose") continue;
+
+				// Path-driven signals need a transport path to be meaningful.
+				if (!rt || rt.kind !== "transport" || L <= 0) continue;
+
+				const sig: ExternalSignal | undefined = st.signal;
+				let distance = item.distance;
+				if (sig && sig.kind === "progress") {
+					distance = clamp(sig.progress, 0, 1) * L;
+				} else if (sig && sig.kind === "entry") {
+					const speed = rt.baseSpeed * this.globalSpeed;
+					distance = Math.max(0, (this.time - sig.tEnter) * speed);
+				} else if (sig && sig.kind === "span") {
+					const dur = sig.tExit - sig.tEnter;
+					const u = dur > 0 ? clamp((this.time - sig.tEnter) / dur, 0, 1) : 1;
+					distance = u * L;
+				} else {
+					// Path-driven contract but the feed gave no usable signal: leave as-is.
+					continue;
+				}
+
+				item.distance = Math.min(distance, L);
+				item.needsWrite = true;
+
+				if (item.distance >= L - 1e-6) {
+					map.delete(st.itemId);
+					this.handOffHeld(item, rt, removed, restyled);
+					handedOff.add(st.itemId);
+				}
+			}
+		}
+
+		// Drop held items that disappeared from the feed this frame.
+		const seen = new Set<number>();
+		for (const m of this.external.values()) {
+			for (const st of m.values()) seen.add(st.itemId);
+		}
+		for (const [id, item] of [...this.items]) {
+			if (!item.held) continue;
+			if (!seen.has(id)) {
+				removed.push(id);
+				this.items.delete(id);
+			}
+		}
+	}
+
+	/**
+	 * Hand a path-driven held item off when it reaches the end of its path.
+	 * Falls back to `externalHandoff` for unmodelled downstream devices, or
+	 * adopts the item into the sim engine when the next device is sim-driven
+	 * (this is the `external → sim` hand-back — see §14.7).
+	 */
+	private handOffHeld(
+		item: InternalItem,
+		from: TransportRT,
+		removed: number[],
+		restyled: ItemRestyleDelta[],
+	): void {
+		const next = this.devices.get(from.def.next);
+		if (!next) {
+			this.externalHandoff(item, pathEnd(from.path), from.def.id, from.def.next);
+			return;
+		}
+		const entry = offsetBetween(
+			next.kind === "junction" || next.kind === "inspector" ? next.def.position : ZERO_OFFSET,
+			pathEnd(from.path),
+		);
+		const accepted = this.acceptItem(next, item, from.def.id, entry, removed, restyled);
+		if (accepted && this.effMode(next.def.id) !== "external") {
+			item.held = false; // adopted into the sim engine
+		}
+	}
+
+	/** Local frame (origin + yaw) a device uses to map device-local → world. */
+	private deviceFrame(rt: DeviceRT): { origin: SimPoint; yaw: number } {
+		if (rt.kind === "transport") {
+			const start = pathStart(rt.path);
+			const pts = rt.path.points;
+			const nxt = pts[1] ?? start;
+			const yaw = Math.atan2(nxt.x - start.x, nxt.z - start.z);
+			return { origin: start, yaw };
+		}
+		if (rt.kind === "junction" || rt.kind === "inspector" || rt.kind === "buffer") {
+			return { origin: rt.def.position, yaw: 0 };
+		}
+		return { origin: { x: 0, y: 0, z: 0 }, yaw: 0 };
+	}
+
+	/** Map a device-local pose into world coordinates. */
+	private localToWorld(
+		origin: SimPoint,
+		yaw: number,
+		lx: number,
+		ly: number,
+		lz: number,
+		lheading: number,
+	): { x: number; y: number; z: number; heading: number } {
+		const fwdX = Math.sin(yaw);
+		const fwdZ = Math.cos(yaw);
+		const rgtX = Math.cos(yaw);
+		const rgtZ = -Math.sin(yaw);
+		return {
+			x: origin.x + rgtX * lx + fwdX * lz,
+			y: origin.y + ly,
+			z: origin.z + rgtZ * lx + fwdZ * lz,
+			heading: yaw + lheading,
 		};
 	}
 
@@ -335,32 +766,31 @@ export class FactorySim {
 	// ---------------------------------------------------------------------------
 
 	private validateTopology(): void {
+		// A referenced device may be a real sim device OR an external-only
+		// device (fed from outside, not present in `this.devices`). Only a
+		// duplicate id is fatal.
 		for (const rt of this.devices.values()) {
 			if (rt.kind === "source") {
 				const out = this.devices.get(rt.def.output);
-				if (!out || out.kind !== "transport") {
+				if (out && out.kind !== "transport") {
 					throw new Error(
 						`FactorySim: source "${rt.def.id}" must output to a transport (got "${rt.def.output}")`,
 					);
 				}
 			} else if (rt.kind === "transport") {
-				if (!this.devices.has(rt.def.next)) {
+				if (
+					this.devices.has(rt.def.next) &&
+					this.devices.get(rt.def.next)?.kind === "source"
+				) {
 					throw new Error(
-						`FactorySim: transport "${rt.def.id}" references unknown next device "${rt.def.next}"`,
+						`FactorySim: transport "${rt.def.id}" references a source as next device`,
 					);
 				}
-			} else if (rt.kind === "junction") {
-				const targets = [
-					...Object.values(rt.def.routes ?? {}),
-					...(rt.def.alternate?.devices ?? []),
-				];
-				for (const targetId of targets) {
-					const target = this.devices.get(targetId);
-					if (!target || (target.kind !== "transport" && target.kind !== "sink")) {
-						throw new Error(
-							`FactorySim: junction "${rt.def.id}" routes to invalid device "${targetId}"`,
-						);
-					}
+			} else if (rt.kind === "inspector") {
+				if (!rt.def.routes[rt.def.defaultVerdict]) {
+					throw new Error(
+						`FactorySim: inspector "${rt.def.id}" has no route for its default verdict "${rt.def.defaultVerdict}"`,
+					);
 				}
 			}
 		}
@@ -381,10 +811,7 @@ export class FactorySim {
 		}
 	}
 
-	private tryEnterTransport(
-		item: InternalItem,
-		transport: TransportRT,
-	): boolean {
+	private tryEnterTransport(item: InternalItem, transport: TransportRT): boolean {
 		if (!transport.running) return false;
 		const gap = transport.def.minGap ?? this.defaultMinGap;
 		const first = transport.items[0];
@@ -401,10 +828,7 @@ export class FactorySim {
 		for (const rt of this.devices.values()) {
 			if (rt.kind !== "source" || !rt.running) continue;
 			rt.timer += dt;
-			const interval = Math.max(
-				rt.def.interval / Math.max(this.sourceRate, 0.01),
-				0.05,
-			);
+			const interval = Math.max(rt.def.interval / Math.max(this.sourceRate, 0.01), 0.05);
 			while (rt.timer >= interval) {
 				rt.timer -= interval;
 				this.spawnFromSource(rt, spawned);
@@ -424,11 +848,18 @@ export class FactorySim {
 			colorIndex: type.colorIndex,
 			deviceId: out.def.id,
 			distance: 0,
+			attrs: { ...(type.attrs ?? {}) },
 			needsWrite: true,
 			blockedNotified: false,
 		};
 		if (!this.tryEnterTransport(item, out)) {
 			this.blockedCount++;
+			this.pushEvent({
+				type: "item:blocked",
+				deviceId: source.def.id,
+				itemId: item.id,
+				detail: `source ${source.def.id} blocked at ${out.def.id}`,
+			});
 			return;
 		}
 		this.items.set(item.id, item);
@@ -446,9 +877,14 @@ export class FactorySim {
 		});
 	}
 
-	private tickTransports(dt: number, removed: number[]): void {
+	private tickTransports(
+		dt: number,
+		removed: number[],
+		restyled: ItemRestyleDelta[],
+	): void {
 		for (const rt of this.devices.values()) {
 			if (rt.kind !== "transport") continue;
+			if (this.effMode(rt.def.id) !== "sim") continue; // external: fed, not simulated
 			const speed = rt.running ? rt.baseSpeed * this.globalSpeed : 0;
 			if (speed <= 0) continue;
 
@@ -474,7 +910,7 @@ export class FactorySim {
 
 				const isLast = i === rt.items.length - 1;
 				if (isLast && !ahead && next >= pathLen - 1e-6) {
-					const handedOff = this.handOffFromTransport(rt, item, removed);
+					const handedOff = this.handOffFromTransport(rt, item, removed, restyled);
 					if (!handedOff && !item.blockedNotified) {
 						item.blockedNotified = true;
 						this.blockedCount++;
@@ -489,82 +925,230 @@ export class FactorySim {
 		}
 	}
 
-	private handOffFromTransport(
-		from: TransportRT,
+	/**
+	 * One hand-off entry point for every target kind.
+	 *
+	 * Used both by transports reaching the end of their path and by
+	 * junctions/inspectors releasing their occupant, so a new device kind
+	 * only has to be taught how to ACCEPT an item — never who might hand it
+	 * one. Returns false when the target refuses, which leaves the sender
+	 * holding the item and produces backpressure.
+	 */
+	private acceptItem(
+		target: DeviceRT,
 		item: InternalItem,
+		fromId: string,
+		entry: JunctionOffset,
 		removed: number[],
+		restyled: ItemRestyleDelta[],
 	): boolean {
-		const next = this.devices.get(from.def.next);
-		if (!next) return false;
+		// Crossing into an external-authoritative device: the item keeps its id
+		// but its motion is now driven by the feed. The renderer never notices.
+		if (this.effMode(target.def.id) === "external") {
+			return this.externalAdopt(item, target, fromId);
+		}
 
-		if (next.kind === "transport") {
-			if (!this.tryEnterTransport(item, next)) return false;
-			from.items.pop();
-			this.pushEvent({
-				type: "item:transferred",
-				deviceId: from.def.id,
-				itemId: item.id,
-				detail: `${from.def.id} → ${next.def.id}`,
-			});
+		if (target.kind === "transport") {
+			if (!this.tryEnterTransport(item, target)) return false;
+			this.logTransfer(fromId, target.def.id, item);
 			return true;
 		}
 
-		if (next.kind === "junction") {
-			if (next.occupant || !next.running) return false;
-			from.items.pop();
-			next.occupant = item;
-			next.remaining = next.def.dwell;
+		if (target.kind === "junction" || target.kind === "inspector") {
+			if (target.occupant || !target.running) return false;
+			target.occupant = item;
 			// The item enters at the deck edge facing the infeed, then rolls
 			// to the centre during the dwell phase.
-			next.entry = offsetBetween(next.def.position, pathEnd(from.path));
-			next.exit = ZERO_OFFSET;
-			next.targetId = null;
-			next.phase = "dwell";
-			next.phaseT = 0;
-			next.lift = 0;
-			item.deviceId = next.def.id;
+			target.entry = entry;
+			target.exit = ZERO_OFFSET;
+			target.targetId = null;
+			target.phase = "dwell";
+			target.phaseT = 0;
+			target.lift = 0;
+			if (target.kind === "inspector") target.verdict = null;
+			item.deviceId = target.def.id;
 			item.distance = 0;
 			item.needsWrite = true;
-			this.dirtyDevices.add(next.def.id);
-			this.pushEvent({
-				type: "item:transferred",
-				deviceId: from.def.id,
-				itemId: item.id,
-				detail: `${from.def.id} → ${next.def.id}`,
-			});
+			this.dirtyDevices.add(target.def.id);
+			this.logTransfer(fromId, target.def.id, item);
 			return true;
 		}
 
-		if (next.kind === "sink") {
-			from.items.pop();
-			this.items.delete(item.id);
-			next.consumed++;
+		if (target.kind === "buffer") {
+			const capacity = bufferCapacity(target.def);
+			if (target.stored.length >= capacity) {
+				if (target.def.onFull !== "consume") return false;
+				// Over-capacity with "consume": the item leaves the system but
+				// the overflow is still recorded rather than silently dropped.
+				this.removeItem(item, removed);
+				this.pushEvent({
+					type: "item:consumed",
+					deviceId: target.def.id,
+					itemId: item.id,
+					detail: `overflow @ ${target.def.id}`,
+					payload: { reason: "buffer-full" },
+				});
+				this.logTransfer(fromId, target.def.id, item);
+				return true;
+			}
+
+			target.stored.push(item);
+			item.deviceId = target.def.id;
+			item.distance = 0;
+			item.needsWrite = true;
+			this.dirtyDevices.add(target.def.id);
+			this.pushEvent({
+				type: "buffer:stored",
+				deviceId: target.def.id,
+				itemId: item.id,
+				detail: `${item.typeId} → slot ${target.stored.length - 1}/${capacity}`,
+				payload: {
+					slot: target.stored.length - 1,
+					count: target.stored.length,
+					capacity,
+				},
+			});
+			this.logTransfer(fromId, target.def.id, item);
+
+			if (target.stored.length >= capacity && !target.fullNotified) {
+				target.fullNotified = true;
+				this.pushEvent({
+					type: "buffer:full",
+					deviceId: target.def.id,
+					detail: `${target.def.id} full (${capacity})`,
+					payload: { count: capacity, capacity },
+				});
+			}
+			return true;
+		}
+
+		if (target.kind === "sink") {
+			this.removeItem(item, removed);
+			target.consumed++;
 			this.totalConsumed++;
-			removed.push(item.id);
 			this.pushEvent({
 				type: "item:consumed",
-				deviceId: next.def.id,
+				deviceId: target.def.id,
 				itemId: item.id,
-				detail: `${item.typeId} @ ${next.def.id}`,
+				detail: `${item.typeId} @ ${target.def.id}`,
+				payload: { quality: (item.attrs.quality as SimAttrValue) ?? "unknown" },
 			});
+			this.logTransfer(fromId, target.def.id, item);
 			return true;
 		}
 
 		return false;
 	}
 
-	private tickJunctions(dt: number, removed: number[]): void {
-		for (const rt of this.devices.values()) {
-			if (rt.kind !== "junction") continue;
+	private logTransfer(fromId: string, toId: string, item: InternalItem): void {
+		this.pushEvent({
+			type: "item:transferred",
+			deviceId: fromId,
+			itemId: item.id,
+			detail: `${fromId} → ${toId}`,
+		});
+	}
 
-			// Alternating routing state machine (e.g. a sorter diverter).
-			const outfeeds = junctionOutfeeds(rt.def);
-			if (rt.def.alternate) {
+	private removeItem(item: InternalItem, removed: number[]): void {
+		this.items.delete(item.id);
+		removed.push(item.id);
+	}
+
+	private handOffFromTransport(
+		from: TransportRT,
+		item: InternalItem,
+		removed: number[],
+		restyled: ItemRestyleDelta[],
+	): boolean {
+		const next = this.devices.get(from.def.next);
+		// External-only device (not modelled as a sim device): hand the item's
+		// authority to the feed and stop simulating it.
+		if (!next) {
+			return this.externalHandoff(item, pathEnd(from.path), from.def.id, from.def.next);
+		}
+
+		const entry = offsetBetween(
+			next.kind === "junction" || next.kind === "inspector"
+				? next.def.position
+				: { x: 0, y: 0, z: 0 },
+			pathEnd(from.path),
+		);
+		const accepted = this.acceptItem(next, item, from.def.id, entry, removed, restyled);
+		if (accepted) from.items.pop();
+		return accepted;
+	}
+
+	/** Hand an item to a device that exists in the topology but is externally fed. */
+	private externalAdopt(item: InternalItem, target: DeviceRT, fromId: string): boolean {
+		this.injectExternal(item, this.deviceRefPoint(target), target.def.id);
+		this.logTransfer(fromId, target.def.id, item);
+		return true;
+	}
+
+	/** A stable world point for a device, used when handing an item to it. */
+	private deviceRefPoint(target: DeviceRT): SimPointLike {
+		if (target.kind === "transport") return pathStart(target.path);
+		if (target.kind === "junction" || target.kind === "inspector" || target.kind === "buffer") {
+			return target.def.position;
+		}
+		return { x: 0, y: 0, z: 0 }; // sink / source: no geometry
+	}
+
+	/** Hand an item to a device that is not modelled at all (pure external feed). */
+	private externalHandoff(
+		item: InternalItem,
+		pos: SimPointLike,
+		fromId: string,
+		targetId: string,
+	): boolean {
+		this.injectExternal(item, pos, targetId);
+		this.pushEvent({
+			type: "item:transferred",
+			deviceId: fromId,
+			itemId: item.id,
+			detail: `${fromId} → ${targetId} (external)`,
+		});
+		return true;
+	}
+
+	private injectExternal(item: InternalItem, pos: SimPointLike, targetId: string): void {
+		item.deviceId = targetId;
+		item.held = true;
+		item.needsWrite = true;
+		item.distance = 0;
+		const st: ExternalItemState = {
+			itemId: item.id,
+			typeId: item.typeId,
+			colorIndex: item.colorIndex,
+			x: pos.x,
+			y: pos.y,
+			z: pos.z,
+			heading: 0,
+			attrs: item.attrs,
+		};
+		let map = this.external.get(targetId);
+		if (!map) {
+			map = new Map();
+			this.external.set(targetId, map);
+		}
+		map.set(item.id, st);
+		this.dirtyDevices.add(targetId);
+	}
+
+	private tickTransferLike(
+		dt: number,
+		removed: number[],
+		restyled: ItemRestyleDelta[],
+	): void {
+		for (const rt of this.devices.values()) {
+			if (rt.kind !== "junction" && rt.kind !== "inspector") continue;
+			if (this.effMode(rt.def.id) !== "sim") continue; // external: fed, not simulated
+
+			// Alternating routing state machine (sorter diverter).
+			if (rt.kind === "junction" && rt.def.alternate) {
+				const outfeeds = junctionOutfeeds(rt.def);
 				const interval = Math.max(rt.def.alternate.interval, 0.1);
-				const idx =
-					outfeeds.length > 0
-						? Math.floor(this.time / interval) % outfeeds.length
-						: 0;
+				const idx = outfeeds.length > 0 ? Math.floor(this.time / interval) % outfeeds.length : 0;
 				if (idx !== rt.routeIndex) {
 					rt.routeIndex = idx;
 					this.dirtyDevices.add(rt.def.id);
@@ -586,30 +1170,41 @@ export class FactorySim {
 					item.needsWrite = true;
 					if (rt.phaseT < Math.max(rt.def.dwell, 0)) break;
 
-					// Route decided the moment the load reaches the deck centre.
-					const targetId =
-						rt.def.routes?.[item.typeId] ??
-						outfeeds[rt.routeIndex] ??
-						outfeeds[0];
+					// Inspectors stamp a verdict onto the item at dwell-end.
+					if (rt.kind === "inspector") {
+						const verdict = this.evalInspectorVerdict(rt.def, item);
+						item.attrs[rt.def.writesAttr] = verdict;
+						rt.verdict = verdict;
+						rt.tally[verdict] = (rt.tally[verdict] ?? 0) + 1;
+						const colorIndex = rt.def.verdictColors?.[verdict];
+						if (colorIndex !== undefined && colorIndex !== item.colorIndex) {
+							item.colorIndex = colorIndex;
+							restyled.push({ itemId: item.id, colorIndex });
+						}
+						this.pushEvent({
+							type: "item:inspected",
+							deviceId: rt.def.id,
+							itemId: item.id,
+							detail: `${item.typeId} → ${verdict}`,
+							payload: {
+							verdict,
+							attr: rt.def.writesAttr,
+							...(colorIndex !== undefined ? { colorIndex } : {}),
+						},
+						});
+					}
+
+					const { targetId, lift } = this.resolveCycleTarget(rt);
 					const target = targetId ? this.devices.get(targetId) : undefined;
 					if (!target) break; // keep the occupant waiting
 
-					const idx = targetId ? outfeeds.indexOf(targetId) : -1;
-					if (idx >= 0 && idx !== rt.routeIndex) {
-						rt.routeIndex = idx;
-						this.pushEvent({
-							type: "device:state",
-							deviceId: rt.def.id,
-							detail: `route → ${targetId}`,
-						});
-					}
-					rt.targetId = targetId ?? null;
+					rt.targetId = targetId;
 					rt.exit =
 						target.kind === "transport"
 							? offsetBetween(rt.def.position, pathStart(target.path))
 							: ZERO_OFFSET;
 
-					if (rt.def.lift && this.needsLift(rt, targetId ?? "")) {
+					if (lift && rt.def.lift) {
 						rt.phase = "lifting";
 						rt.phaseT = 0;
 						this.pushEvent({
@@ -618,7 +1213,7 @@ export class FactorySim {
 							detail: `lift up → ${targetId}`,
 						});
 					} else {
-						this.releaseJunction(rt, removed);
+						this.releaseTransferLike(rt, removed, restyled);
 					}
 					break;
 				}
@@ -653,7 +1248,7 @@ export class FactorySim {
 					item.needsWrite = true;
 					if (rt.phaseT >= timing.down) {
 						rt.lift = 0;
-						this.releaseJunction(rt, removed);
+						this.releaseTransferLike(rt, removed, restyled);
 					}
 					break;
 				}
@@ -667,6 +1262,49 @@ export class FactorySim {
 		}
 	}
 
+	/** Evaluate an inspector's verdict for the current occupant. */
+	private evalInspectorVerdict(def: InspectorDef, item: InternalItem): string {
+		if (def.rules) {
+			for (const rule of def.rules) {
+				if (item.attrs[rule.attr] === rule.equals) return rule.verdict;
+			}
+		}
+		if (def.random && Math.random() < def.random.rate) return def.random.verdict;
+		return def.defaultVerdict;
+	}
+
+	/** Decide the downstream device for a dwelled item (junction or inspector). */
+	private resolveCycleTarget(rt: TransferLikeRT): {
+		targetId: string | null;
+		lift: boolean;
+	} {
+		if (rt.kind === "inspector") {
+			const verdict = rt.verdict ?? rt.def.defaultVerdict;
+			const targetId = rt.def.routes[verdict] ?? null;
+			return { targetId, lift: !!rt.def.lift };
+		}
+
+		// junction: route by attribute (default "typeId"), fall back to alternate.
+		const key = rt.def.routeBy ?? "typeId";
+		const raw =
+			key === "typeId"
+				? rt.occupant?.typeId
+				: rt.occupant
+					? rt.occupant.attrs[key]
+					: undefined;
+		const value = raw === undefined ? undefined : String(raw);
+		const routes = rt.def.routes ?? {};
+		let targetId: string | null = value !== undefined ? (routes[value] ?? null) : null;
+		if (!targetId && rt.def.alternate) {
+			targetId =
+				rt.def.alternate.devices[rt.routeIndex] ??
+				rt.def.alternate.devices[0] ??
+				null;
+		}
+		const lift = !!rt.def.lift && this.needsLift(rt, targetId ?? "");
+		return { targetId, lift };
+	}
+
 	/** True when the chosen outfeed needs the lift-and-transfer cycle. */
 	private needsLift(rt: JunctionRT, targetId: string): boolean {
 		const cfg = rt.def.lift;
@@ -676,84 +1314,62 @@ export class FactorySim {
 	}
 
 	/** Hands the occupant to its target device; blocks while the target is full. */
-	private releaseJunction(rt: JunctionRT, removed: number[]): void {
+	private releaseTransferLike(
+		rt: TransferLikeRT,
+		removed: number[],
+		restyled: ItemRestyleDelta[],
+	): void {
 		const item = rt.occupant;
 		if (!item) return;
-		const targetId = rt.targetId;
-		const target = targetId ? this.devices.get(targetId) : undefined;
-		if (!target) return;
+		const { targetId } = this.resolveCycleTarget(rt);
+		if (!targetId) return;
 
-		if (target.kind === "transport") {
-			if (!this.tryEnterTransport(item, target)) return;
-			rt.occupant = null;
-			rt.phase = "idle";
-			rt.phaseT = 0;
-			rt.lift = 0;
-			rt.targetId = null;
-			rt.exit = ZERO_OFFSET;
-			this.dirtyDevices.add(rt.def.id);
-			this.pushEvent({
-				type: "item:transferred",
-				deviceId: rt.def.id,
-				itemId: item.id,
-				detail: `${rt.def.id} → ${target.def.id}`,
-			});
-			return;
+		const target = this.devices.get(targetId);
+		if (!target) {
+			// External-only device: hand authority to the feed.
+			this.externalHandoff(item, rt.def.position, rt.def.id, targetId);
+		} else {
+			const entry =
+				target.kind === "junction" || target.kind === "inspector"
+					? offsetBetween(target.def.position, rt.def.position)
+					: ZERO_OFFSET;
+			if (!this.acceptItem(target, item, rt.def.id, entry, removed, restyled)) {
+				return; // target refused — keep occupant, retry next frame
+			}
 		}
 
-		if (target.kind === "sink") {
-			rt.occupant = null;
-			rt.phase = "idle";
-			rt.phaseT = 0;
-			rt.lift = 0;
-			rt.targetId = null;
-			rt.exit = ZERO_OFFSET;
-			this.dirtyDevices.add(rt.def.id);
-			this.items.delete(item.id);
-			target.consumed++;
-			this.totalConsumed++;
-			removed.push(item.id);
-			this.pushEvent({
-				type: "item:consumed",
-				deviceId: target.def.id,
-				itemId: item.id,
-				detail: `${item.typeId} @ ${target.def.id}`,
-			});
-		}
+		rt.occupant = null;
+		rt.phase = "idle";
+		rt.phaseT = 0;
+		rt.lift = 0;
+		rt.targetId = null;
+		rt.exit = ZERO_OFFSET;
+		if (rt.kind === "inspector") rt.verdict = null;
+		this.dirtyDevices.add(rt.def.id);
 	}
 
 	/**
-	 * Position of an item on a junction deck, in world coordinates.
+	 * Position of an item on a junction/inspector deck, in world coordinates.
 	 *
 	 * dwell    – rolls from the infeed edge to the deck centre
 	 * lifting  – sits at the centre while the cassette rises
 	 * transfer – driven out sideways along the exit offset
 	 * lowering – held at the exit point while the cassette retracts
 	 */
-	private junctionItemOffset(rt: JunctionRT): JunctionOffset {
+	private cycleItemOffset(rt: TransferLikeRT): JunctionOffset {
 		const timing = liftTiming(rt.def.lift);
 		const liftY = timing.height * rt.lift;
 
 		if (rt.phase === "dwell") {
 			const t = Math.min(1, rt.phaseT / Math.max(rt.def.dwell, 1e-6));
 			const e = rt.entry;
-			return {
-				x: e.x * (1 - t),
-				y: e.y * (1 - t),
-				z: e.z * (1 - t),
-				heading: e.heading,
-			};
+			return { x: e.x * (1 - t), y: e.y * (1 - t), z: e.z * (1 - t), heading: e.heading };
 		}
 
 		if (rt.phase === "transfer") {
 			const t = Math.min(1, rt.phaseT / timing.transfer);
 			const x = rt.exit;
-			return {
-				x: x.x * t,
-				y: x.y * t + liftY,
-				z: x.z * t,
-				heading: x.heading,
-			};
+			return { x: x.x * t, y: x.y * t + liftY, z: x.z * t, heading: x.heading };
 		}
 
 		if (rt.phase === "lowering") {
@@ -765,11 +1381,91 @@ export class FactorySim {
 		return { x: 0, y: liftY, z: 0, heading: rt.entry.heading };
 	}
 
+	private tickBuffers(dt: number, removed: number[]): void {
+		for (const rt of this.devices.values()) {
+			if (rt.kind !== "buffer") continue;
+			if (this.effMode(rt.def.id) !== "sim") continue; // external: fed, not simulated
+			if (rt.stored.length === 0) {
+				rt.timer = 0;
+				continue;
+			}
+			rt.timer += dt;
+			if (rt.def.drainAfter && rt.def.drainAfter > 0 && rt.timer >= rt.def.drainAfter) {
+				const n = rt.stored.length;
+				for (const it of rt.stored) this.removeItem(it, removed);
+				rt.stored = [];
+				rt.timer = 0;
+				rt.drainedCount += n;
+				rt.fullNotified = false;
+				this.dirtyDevices.add(rt.def.id);
+				this.pushEvent({
+					type: "buffer:drained",
+					deviceId: rt.def.id,
+					detail: `drained ${n}`,
+					payload: { count: n },
+				});
+			}
+		}
+	}
+
 	private collectMoved(): ItemMoveDelta[] {
 		const moved: ItemMoveDelta[] = [];
 		for (const item of this.items.values()) {
 			if (!item.needsWrite) continue;
 			item.needsWrite = false;
+
+			// Externally-authoritative items resolve from the contract.
+			if (item.held) {
+				const contract = this.effContract(item.deviceId);
+				if (contract.signal === "pose") {
+					// Pose: read the feed (optionally transform device-local → world).
+					const st = this.external.get(item.deviceId)?.get(item.id);
+					if (st) {
+						// Prefer coordinates carried by the pose signal; fall back to the flat fields.
+						let lx = st.x ?? 0;
+						let ly = st.y ?? 0;
+						let lz = st.z ?? 0;
+						let lh = st.heading ?? 0;
+						if (st.signal && st.signal.kind === "pose") {
+							lx = st.signal.x;
+							ly = st.signal.y;
+							lz = st.signal.z;
+							lh = st.signal.heading;
+						}
+						const frame =
+							st.signal && st.signal.kind === "pose" ? st.signal.frame : contract.frame ?? "world";
+						if (frame === "local") {
+							const rt = this.devices.get(item.deviceId);
+							if (rt) {
+								const f = this.deviceFrame(rt);
+								const w = this.localToWorld(f.origin, f.yaw, lx, ly, lz, lh);
+								moved.push({ itemId: item.id, x: w.x, y: w.y, z: w.z, heading: w.heading });
+								continue;
+							}
+						}
+						moved.push({ itemId: item.id, x: lx, y: ly, z: lz, heading: lh });
+					}
+					continue;
+				}
+
+				// Path-driven (progress / entry / span): sample the transport path.
+				const rt = this.devices.get(item.deviceId);
+				if (rt && rt.kind === "transport") {
+					const sample = sampleSimPath(rt.path, item.distance);
+					moved.push({
+						itemId: item.id,
+						x: sample.position.x,
+						y: sample.position.y,
+						z: sample.position.z,
+						heading: sample.heading,
+					});
+				} else {
+					const st = this.external.get(item.deviceId)?.get(item.id);
+					if (st) moved.push({ itemId: item.id, x: st.x ?? 0, y: st.y ?? 0, z: st.z ?? 0, heading: st.heading ?? 0 });
+				}
+				continue;
+			}
+
 			const rt = this.devices.get(item.deviceId);
 			if (!rt) continue;
 
@@ -782,8 +1478,8 @@ export class FactorySim {
 					z: sample.position.z,
 					heading: sample.heading,
 				});
-			} else if (rt.kind === "junction") {
-				const off = this.junctionItemOffset(rt);
+			} else if (rt.kind === "junction" || rt.kind === "inspector") {
+				const off = this.cycleItemOffset(rt);
 				moved.push({
 					itemId: item.id,
 					x: rt.def.position.x + off.x,
@@ -791,6 +1487,12 @@ export class FactorySim {
 					z: rt.def.position.z + off.z,
 					heading: off.heading,
 				});
+			} else if (rt.kind === "buffer") {
+				const idx = rt.stored.indexOf(item);
+				if (idx >= 0) {
+					const p = bufferSlotPosition(rt.def, idx);
+					moved.push({ itemId: item.id, x: p.x, y: p.y, z: p.z, heading: 0 });
+				}
 			}
 		}
 		return moved;
@@ -818,6 +1520,26 @@ export class FactorySim {
 					phase: rt.phase,
 					occupied: rt.occupant !== null,
 				};
+			} else if (rt.kind === "inspector") {
+				delta = {
+					deviceId: id,
+					running: rt.running,
+					speed: 0,
+					lift: rt.lift,
+					phase: rt.phase,
+					occupied: rt.occupant !== null,
+					lastVerdict: rt.verdict ?? undefined,
+				};
+			} else if (rt.kind === "buffer") {
+				const capacity = bufferCapacity(rt.def);
+				delta = {
+					deviceId: id,
+					running: true,
+					speed: 0,
+					count: rt.stored.length,
+					capacity,
+					fill: capacity > 0 ? rt.stored.length / capacity : 0,
+				};
 			} else if (rt.kind === "source") {
 				delta = { deviceId: id, running: rt.running, speed: 0 };
 			} else {
@@ -827,6 +1549,15 @@ export class FactorySim {
 			out.push(delta);
 		}
 		this.dirtyDevices.clear();
+
+		// External-only devices (fed, not modelled as sim devices): emit a
+		// minimal "running" state so renderers can show a device badge.
+		for (const deviceId of this.external.keys()) {
+			if (this.devices.has(deviceId)) continue;
+			const d: DeviceStateDelta = { deviceId, running: true, speed: 0 };
+			this.liveStates.set(deviceId, d);
+			out.push(d);
+		}
 		return out;
 	}
 }

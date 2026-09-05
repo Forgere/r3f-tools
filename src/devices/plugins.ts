@@ -1,4 +1,7 @@
 import { BallTransferTable } from "./BallTransferTable";
+import { CuteInspectionStation } from "./CuteInspectionStation";
+import { CuteOverUnderPass } from "./CuteOverUnderPass";
+import { CuteRejectRack } from "./CuteRejectRack";
 import { LiftTransferUnit } from "./LiftTransferUnit";
 import type { DeviceRendererPlugin, DeviceTheme } from "./types";
 
@@ -95,4 +98,47 @@ export const BUILTIN_DEVICE_PLUGINS: DeviceRendererPlugin[] = [
 	cuteLiftTransferPlugin,
 	industrialLiftTransferPlugin,
 	ballTransferTablePlugin,
+];
+
+/** Device kind for the inspection gantry that stamps a pass/fail verdict. */
+export const INSPECTOR_KIND = "inspector";
+
+/** Device kind for the grid rack that piles up rejected cargo. */
+export const BUFFER_KIND = "buffer";
+
+/** Device kind for a decorative over-under bridge at belt crossings. */
+export const OVER_UNDER_KIND = "over-under";
+
+/** Pastel inspection station: scanning gantry over the belt. */
+export const cuteInspectionPlugin: DeviceRendererPlugin = {
+	kind: INSPECTOR_KIND,
+	label: "检查站台 Inspection",
+	description: "货物流经时扫描判定合格/不合格，并驱动分流灯",
+	defaultTheme: CUTE_THEME,
+	Component: CuteInspectionStation,
+};
+
+/** Pastel reject rack: grid of slots for failed cargo. */
+export const cuteRejectRackPlugin: DeviceRendererPlugin = {
+	kind: BUFFER_KIND,
+	label: "不合格货架 Reject rack",
+	description: "按栅格堆放不合格货物，接近满载时告警灯闪烁",
+	defaultTheme: CUTE_THEME,
+	Component: CuteRejectRack,
+};
+
+/** Decorative over-under bridge for conveyor crossings / overlaps. */
+export const cuteOverUnderPlugin: DeviceRendererPlugin = {
+	kind: OVER_UNDER_KIND,
+	label: "跨线桥 Over-under",
+	description: "输送线交叉/重叠处的跨线桥，用设备替代穿模部位",
+	defaultTheme: CUTE_THEME,
+	Component: CuteOverUnderPass,
+};
+
+/** Inspector / buffer / over-under presets, registered alongside transfer decks. */
+export const INSPECTION_PLUGINS: DeviceRendererPlugin[] = [
+	cuteInspectionPlugin,
+	cuteRejectRackPlugin,
+	cuteOverUnderPlugin,
 ];

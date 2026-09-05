@@ -1,0 +1,22 @@
+{
+	"compilerOptions": {
+		"target": "ES2020",
+		"module": "CommonJS",
+		"lib": ["DOM", "ES2020"],
+		"strict": true,
+		"skipLibCheck": true,
+		"esModuleInterop": true,
+		"allowSyntheticDefaultImports": true,
+		"moduleResolution": "node",
+		"noEmit": false,
+		"rootDir": ".",
+		"outDir": "dist-harness",
+		"declaration": false,
+		"sourceMap": false,
+		"isolatedModules": false,
+		"noUncheckedIndexedAccess": true,
+		"noImplicitReturns": true,
+		"noFallthroughCasesInSwitch": true
+	},
+	"include": ["src/sim/**/*", "scripts/**/*"]
+}

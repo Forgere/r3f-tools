@@ -1,0 +1,16 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"rootDir": ".",
+		"noEmit": true
+	},
+	"include": [
+		"src/**/*",
+		"examples/VividFactoryConveyorExample.tsx"
+	],
+	"exclude": [
+		"node_modules",
+		"dist",
+		"examples/dist"
+	]
+}
