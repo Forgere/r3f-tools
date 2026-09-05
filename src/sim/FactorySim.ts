@@ -187,6 +187,12 @@ export interface FactorySimOptions {
 	 * `"sim"` (run the engine) or `"external"` (fed from outside).
 	 */
 	deviceSources?: Record<string, "sim" | "external">;
+	/**
+	 * Seed for all in-kernel randomness (item-type rolls, inspection
+	 * verdicts). Provide one to make every episode reproducible bit-for-bit;
+	 * omit it for a nondeterministic run (a random seed is drawn).
+	 */
+	seed?: number;
 }
 
 const ZERO_OFFSET: JunctionOffset = { x: 0, y: 0, z: 0, heading: 0 };
@@ -275,11 +281,29 @@ export function bufferSlotPosition(def: BufferDef, index: number): SimPoint {
 	};
 }
 
-function pickItemType(types: SimItemType[]): SimItemType | undefined {
+/**
+ * mulberry32 — tiny deterministic PRNG. A simulation that cannot be re-run
+ * bit-for-bit cannot produce training data, so all randomness in the kernel
+ * flows through an injectable, seeded generator.
+ */
+function mulberry32(seed: number): () => number {
+	let a = seed >>> 0;
+	return () => {
+		a = (a + 0x6d2b79f5) | 0;
+		let t = Math.imul(a ^ (a >>> 15), 1 | a);
+		t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+	};
+}
+
+function pickItemType(
+	types: SimItemType[],
+	rng: () => number,
+): SimItemType | undefined {
 	if (types.length === 0) return undefined;
 	let total = 0;
 	for (const t of types) total += t.weight ?? 1;
-	let r = Math.random() * total;
+	let r = rng() * total;
 	for (const t of types) {
 		r -= t.weight ?? 1;
 		if (r <= 0) return t;
@@ -319,6 +343,10 @@ export class FactorySim {
 	private globalSpeed = 1;
 	private sourceRate = 1;
 
+	/** Seed the sim was constructed (or last reset) with. */
+	private currentSeed: number;
+	private rng: () => number;
+
 	totalSpawned = 0;
 	totalConsumed = 0;
 	blockedCount = 0;
@@ -328,6 +356,8 @@ export class FactorySim {
 		this.eventLogSize = options.eventLogSize ?? 250;
 		this.defaultMinGap = options.defaultMinGap ?? 0.45;
 		this.worldMode = options.worldMode ?? "sim";
+		this.currentSeed = options.seed ?? Math.floor(Math.random() * 2 ** 32);
+		this.rng = mulberry32(this.currentSeed);
 		for (const [id, src] of Object.entries(options.deviceSources ?? {})) {
 			this.deviceSources.set(id, src);
 		}
@@ -421,6 +451,77 @@ export class FactorySim {
 	 */
 	getElapsed(): number {
 		return this.time;
+	}
+
+	/** The seed the current episode runs on — record it alongside any exported event log so the episode can be reproduced. */
+	getSeed(): number {
+		return this.currentSeed;
+	}
+
+	/**
+	 * Reset the world to t=0 and reseed the RNG: every item, event, counter
+	 * and per-device runtime value returns to its initial state. Control
+	 * settings (running, speed multipliers, world mode, data sources,
+	 * contracts) are deliberately kept — an episode rerun should differ only
+	 * if the seed differs. With no argument the sim replays the SAME episode
+	 * (same seed); pass a seed to start a different reproducible episode.
+	 */
+	reset(seed?: number): void {
+		this.currentSeed = seed ?? this.currentSeed;
+		this.rng = mulberry32(this.currentSeed);
+
+		this.items.clear();
+		this.nextItemId = 1;
+		this.eventSeq = 1;
+		this.events.length = 0;
+		this.dirtyDevices.clear();
+		this.liveStates.clear();
+		this.external.clear();
+		this.totalSpawned = 0;
+		this.totalConsumed = 0;
+		this.blockedCount = 0;
+		this.time = 0;
+
+		for (const rt of this.devices.values()) {
+			switch (rt.kind) {
+				case "source":
+					rt.timer = 0;
+					break;
+				case "transport":
+					rt.items = [];
+					break;
+				case "junction":
+					rt.occupant = null;
+					rt.remaining = 0;
+					rt.routeIndex = 0;
+					this.resetCycle(rt);
+					break;
+				case "inspector":
+					rt.occupant = null;
+					rt.verdict = null;
+					rt.tally = {};
+					this.resetCycle(rt);
+					break;
+				case "buffer":
+					rt.stored = [];
+					rt.timer = 0;
+					rt.fullNotified = false;
+					rt.drainedCount = 0;
+					break;
+				case "sink":
+					rt.consumed = 0;
+					break;
+			}
+		}
+	}
+
+	private resetCycle(rt: CycleRT): void {
+		rt.phase = "idle";
+		rt.phaseT = 0;
+		rt.lift = 0;
+		rt.entry = ZERO_OFFSET;
+		rt.exit = ZERO_OFFSET;
+		rt.targetId = null;
 	}
 
 	/** Switch the global data-source mode. Marks every device dirty so renderers re-read state. */
@@ -839,7 +940,7 @@ export class FactorySim {
 	private spawnFromSource(source: SourceRT, spawned: ItemSpawnDelta[]): void {
 		const out = this.devices.get(source.def.output);
 		if (!out || out.kind !== "transport") return;
-		const type = pickItemType(source.def.itemTypes);
+		const type = pickItemType(source.def.itemTypes, this.rng);
 		if (!type) return;
 
 		const item: InternalItem = {
@@ -1269,7 +1370,7 @@ export class FactorySim {
 				if (item.attrs[rule.attr] === rule.equals) return rule.verdict;
 			}
 		}
-		if (def.random && Math.random() < def.random.rate) return def.random.verdict;
+		if (def.random && this.rng() < def.random.rate) return def.random.verdict;
 		return def.defaultVerdict;
 	}
 
