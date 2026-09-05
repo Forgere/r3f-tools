@@ -30,10 +30,24 @@ factory in the browser and make that world useful beyond visualization:
   behaviour are swappable plugins, so a vendor machine model or a custom PLC
   rule drops in at runtime without touching the core.
 
-Current focus on closing the gap: world (de)serialization + machine-readable
-layout validation (so AI can read/write production lines), deterministic
-seeded simulation + event-log persistence (so training data is reproducible),
-and unifying the `src/core` track-graph world with the `src/sim` kernel.
+Shipped toward this goal:
+
+- **Factory as data** — `FactoryLayout` + `validateFactoryLayout` +
+  `createSimFromLayout` (`src/sim/layout.ts`): a whole factory is JSON,
+  validated with structured issues, and built into a running sim with one
+  call. The VividFactory example itself boots through this path.
+- **Deterministic, recordable episodes** — seeded RNG +
+  `reset(seed?)` + `exportEpisode()`: same defs + same seed replays an
+  episode bit-for-bit, and the exported event log is plain JSON with
+  queryable structured payloads.
+- **Layer decision** — `src/sim/` is the single runtime kernel; `src/core/`
+  (TrackGraph & friends) is the design-time/geometry layer serving
+  TrackRenderer. Convergence, when needed, is a `TrackGraph → FactoryLayout`
+  compiler, not a merge.
+
+Current focus: a `TrackGraph → FactoryLayout` compiler (design-time to
+runtime bridge), scale-out (Worker-based sim, render LOD), and richer
+device models (failure rates, takt jitter, AGV/resource constraints).
 
 ## Features
 
@@ -57,6 +71,33 @@ pnpm add r3f-tools
 ```
 
 ## Usage
+
+### Factory layout as data
+
+A whole factory is JSON: validate it, build a running sim from it, record
+episodes you can replay bit-for-bit.
+
+```ts
+import {
+  createSimFromLayout,
+  validateFactoryLayout,
+} from 'r3f-tools'
+
+const layout = JSON.parse(layoutJson)
+
+// Structured issues for tooling/AI self-correction — never throws.
+const issues = validateFactoryLayout(layout)
+// A reference to a device absent from the layout is a *warning*, not an
+// error: that is how external-only devices (fed via ingestExternalFrame)
+// are declared.
+
+const sim = createSimFromLayout(layout, { seed: 42 })
+// … tick per frame: const delta = sim.tick(dt)
+
+// Record + replay: same layout + same seed reproduces every event.
+const episode = sim.exportEpisode() // { seed, duration, events, stats }
+sim.reset(42) // rewind to t=0, keep control settings, replay exactly
+```
 
 ### Factory track graph and device plugins
 

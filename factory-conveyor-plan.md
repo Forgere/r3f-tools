@@ -664,3 +664,68 @@ ext-src → ext-line → ext-sink            // external-only 数字孪生车道
 
 > 注：其余示例文件（`AnimatedInstancesExample` 等）存在与本次无关的既有类型错误，
 > 项目自带 `npm run typecheck` 仅覆盖 `src`，不在本次范围。
+
+---
+
+## 16. 布局即数据 + 确定性内核（2026-09-05，已实现）
+
+> 目标收口 README「Project Goal」里最关键的两块短板：**AI 可读写的产线** 与
+> **可复现的 AI 训练数据**。
+
+### 16.1 FactoryLayout：整厂即 JSON（新模块 `src/sim/layout.ts`）
+
+- `FactoryLayout = { version, name, options?, devices: SimDeviceDef[] }` —— `SimDeviceDef`
+  本就是纯数据（SimPoint 原始类型、attrs 仅原始值），整厂可以直接 `JSON.stringify`。
+- `validateFactoryLayout(data): LayoutIssue[]` —— 纯校验器，**不抛异常**，一次返回全部
+  结构化问题（`severity` + `code` + `message`），给编辑器 / AI agent 自愈用。
+  关键语义：引用一个不在 layout 里的设备是 **warning 而非 error** —— 那正是
+  external-only 设备（`ingestExternalFrame` 喂数）的合法形态。
+- `parseFactoryLayout(data)` —— 有 error 才抛（消息含全部 issue 列表），否则窄化为 `FactoryLayout`。
+- `createSimFromLayout(data, options?)` —— 解析 + 建 sim；`layout.options`
+  （worldMode/deviceSources/defaultMinGap/eventLogSize）注入构造，显式 options 覆盖之。
+- 校验规则与 `FactorySim.validateTopology` 对齐（source→transport、transport↛source、
+  inspector 的 defaultVerdict 必须有路由），并补充字段级约束（interval>0、rate∈[0,1]、
+  points≥2、spacing 三元组、attrs 必须结构化克隆友好…）。
+
+### 16.2 确定性仿真 + 可复现 episode（`FactorySim`）
+
+- 内核全部随机性（itemTypes 加权抽取、inspector random 判定）改走**可注入的
+  mulberry32 PRNG**；`FactorySimOptions.seed` 给定后 episode 逐位可复现。
+- `reset(seed?)`：世界回到 t=0（物料、事件、计数、设备运行时全清），**保留控制配置**
+  （running / globalSpeed / worldMode / dataSource / contract）——episode 重放只应由
+  seed 区分。`getSeed()` 供记录侧取回种子。
+- `exportEpisode(): SimEpisode`（types.ts 新增）：`{ seed, duration, events, stats }`
+  纯 JSON。layout + episode 一对即一份完整训练数据：同 defs + 同 seed 重放，
+  事件流逐位一致。事件 seq/time 单调，payload 结构化（reject 率、吞吐直接查询，
+  无需解析文本）。长 episode 用 `eventLogSize` 放大环形日志。
+
+### 16.3 双轨决策：core 与 sim 不合并，分工固定（§11.5 遗留问题收口）
+
+审计结果：`core`（TrackGraph/DeviceRuntime/DevicePluginRegistry/SegmentPluginRegistry）
+唯一使用者是 **TrackRenderer + MaterialFlow + FactoryLayoutExample** 这条
+「编辑/几何」链路；`sim/FactorySim` 是 VividFactory 用的「运行时内核」。决策：
+
+1. **`src/sim/` + `FactoryLayout` 是仿真/数字孪生/AI 数据场景的唯一运行时**。
+   新设备行为（新 kind、新规则）一律进 sim 内核 + layout schema。
+2. **`src/core/` 保留为设计时（authoring/几何）层**：TrackGraph 回答「谁连谁、归谁所有」，
+   segment 插件管几何，DevicePlugin 管 MaterialFlow 手工 transfer 的接受规则。
+   **不再往 DeviceRuntime 上加运行时控制逻辑**（它从未被 FactorySim 使用，保持现状即边界）。
+3. 若未来需要「编辑器画的图直接跑仿真」，方向是 **编译器 `TrackGraph → FactoryLayout`**
+   （设计时产物编译为运行时数据），而不是合并两个内核。
+
+### 16.4 示例接线
+
+`VividFactoryConveyorExample` 的 `buildFactorySim` → `buildFactoryLayout`：先产出
+layout 数据，`validateFactoryLayout` 自检（warning 打 console），再 `createSimFromLayout`
+建 sim —— 示例本身就在走「外部工具/AI 改 JSON」的同一条路。
+
+### 16.5 验收
+
+- [x] `src/sim/layout.ts` + 导出；`tsc --noEmit`（src 与 src+example 联合）通过。
+- [x] harness `layoutFromJson`：JSON 往返与手写 defs 行为一致（物料守恒、产出数一致），
+      校验器抓重复 id / 悬空引用（warning）/ 不可路由 defaultVerdict —— 14/14。
+- [x] harness `determinism`：同 seed 两实例 delta+事件+统计逐位一致；`reset()` 逐位重放；
+      不同 seed 分流 —— 14/14。
+- [x] harness `episodeRecording`：episode JSON 往返无损；seed 重放事件流一致；
+      payload 结构化查询与 stats 对齐；事件 seq/time 单调 —— 9/9。
+- [x] 既有 `externalSignals` harness 回归 12/12 不受影响。
