@@ -17,6 +17,7 @@ import type {
 	JunctionPhase,
 	SimAttrValue,
 	SimDeviceDef,
+	SimEpisode,
 	SimEvent,
 	SimItemSnapshot,
 	SimItemType,
@@ -600,6 +601,21 @@ export class FactorySim {
 	/** Scales every source's spawn frequency. */
 	setSourceRate(multiplier: number): void {
 		this.sourceRate = Math.max(0, multiplier);
+	}
+
+	/**
+	 * Export the current run as a plain-JSON episode: seed + event log +
+	 * closing stats. Together with the layout (device defs) this is a
+	 * complete training-data record: re-running the same defs with the same
+	 * seed reproduces every event bit-for-bit.
+	 */
+	exportEpisode(): SimEpisode {
+		return {
+			seed: this.currentSeed,
+			duration: this.time,
+			events: [...this.events],
+			stats: this.getStats(),
+		};
 	}
 
 	getRecentEvents(count: number): SimEvent[] {

@@ -148,6 +148,7 @@ export type {
 	JunctionPhase,
 	SimAttrValue,
 	SimDeviceDef,
+	SimEpisode,
 	SimEvent,
 	SimEventType,
 	SimItemSnapshot,

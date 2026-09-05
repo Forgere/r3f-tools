@@ -256,6 +256,24 @@ export interface SimEvent {
 	payload?: Record<string, SimAttrValue>;
 }
 
+/**
+ * One recorded run of the world: the seed it was produced with, the events
+ * that happened, and the closing stats. Pure JSON — persist it, ship it, or
+ * re-run it: `new FactorySim(defs, { seed: episode.seed })` replays the
+ * episode bit-for-bit (provided the defs and control settings match).
+ *
+ * The event slice is bounded by the sim's `eventLogSize`; recorders that
+ * need complete long-running episodes should construct the sim with a large
+ * log (or tap deltas per tick).
+ */
+export interface SimEpisode {
+	seed: number;
+	/** Sim-time duration of the episode in seconds. */
+	duration: number;
+	events: SimEvent[];
+	stats: SimStats;
+}
+
 // -----------------------------------------------------------------------------
 // Frame delta — the ONLY thing a renderer needs per frame.
 // A renderer applies spawned/moved/removed and never recomputes logic.
