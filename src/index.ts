@@ -114,6 +114,14 @@ export type {
 } from "./core/types";
 export { FactorySim, type FactorySimOptions } from "./sim/FactorySim";
 export {
+	type FactoryLayout,
+	isFactoryLayout,
+	type LayoutIssue,
+	type LayoutIssueSeverity,
+	parseFactoryLayout,
+	validateFactoryLayout,
+} from "./sim/layout";
+export {
 	buildSimPath,
 	filletSimPolyline,
 	sampleSimPath,
