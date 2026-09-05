@@ -1,3 +1,4 @@
+import { FactorySim, type FactorySimOptions } from "./FactorySim";
 import type {
 	BufferDef,
 	InspectorDef,
@@ -815,4 +816,18 @@ export function parseFactoryLayout(data: unknown): FactoryLayout {
 		);
 	}
 	return data as FactoryLayout;
+}
+
+/**
+ * Parse a layout (typically from JSON) and construct a ready-to-tick
+ * `FactorySim`. `layout.options` seeds the sim options; explicit `options`
+ * win over the layout's, so a runner can override mode or log size without
+ * editing the layout file.
+ */
+export function createSimFromLayout(
+	data: unknown,
+	options?: FactorySimOptions,
+): FactorySim {
+	const layout = parseFactoryLayout(data);
+	return new FactorySim(layout.devices, { ...layout.options, ...options });
 }

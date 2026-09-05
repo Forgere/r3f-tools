@@ -114,6 +114,7 @@ export type {
 } from "./core/types";
 export { FactorySim, type FactorySimOptions } from "./sim/FactorySim";
 export {
+	createSimFromLayout,
 	type FactoryLayout,
 	isFactoryLayout,
 	type LayoutIssue,
