@@ -62,6 +62,13 @@ export {
 	type VerticalLiftProps,
 } from "./components/VerticalLift";
 export {
+	type CompileIssue,
+	type CompileIssueCode,
+	compileTrackGraph,
+	type CompileTrackGraphOptions,
+	type CompileTrackGraphResult,
+} from "./core/compileTrackGraph";
+export {
 	type DevicePluginDegradedEvent,
 	DevicePluginRegistry,
 	type DevicePluginRegistryOptions,
