@@ -729,3 +729,39 @@ layout 数据，`validateFactoryLayout` 自检（warning 打 console），再 `c
 - [x] harness `episodeRecording`：episode JSON 往返无损；seed 重放事件流一致；
       payload 结构化查询与 stats 对齐；事件 seq/time 单调 —— 9/9。
 - [x] 既有 `externalSignals` harness 回归 12/12 不受影响。
+
+---
+
+## 17. TrackGraph → FactoryLayout 编译器（2026-09-05，已实现）
+
+> §16.3 决策的落地：设计时（core）与运行时（sim）通过**编译器**衔接，双内核不合并。
+> 新模块 `src/core/compileTrackGraph.ts`（core → sim 单向依赖，无环）。
+
+### 17.1 编译规则
+
+| 设计时（TrackGraph） | 运行时（FactoryLayout） |
+| --- | --- |
+| 拥有 edges 的设备 | `transport`：edges 按节点串链 → 每段用 segment 生成器解曲线 → 按弧长采样成 `points`（`cornerRadius: 0`，几何已定稿，不再二次圆角） |
+| 链尾节点的 `handoff` | `next` = 接收设备 id |
+| 链尾无 handoff（开口） | 合成 `<deviceId>__end` sink + warning（`onDeadEnd:"error"` 可升级） |
+| 无 edges 的设备 | 经 `config.simKind`（source/junction/inspector/buffer/sink）映射，其余字段读 `config` 袋 |
+| 设备分支 / 断链 / 环 | **结构化 error issue，不产出**——transport 是线性的，分叉必须拆设备 + handoff |
+| handoff 落在接收设备链中段 | warning：sim 只在接收方**路径起点**放物料，会视觉跳变 |
+
+- 段采样：`params.resolution`（采样点数）优先，否则按 `sampleSpacing`（默认 0.3）弧长均分；
+  支持 `SegmentPluginRegistry` 自定义几何（故障按设备降级为直线）。
+- 速度语义区分：core `DeviceState.speed` 是倍率、sim `TransportDef.speed` 是 m/s；
+  编译只读 `config.speed`（m/s，默认 1）。运行状态（running）是控制面，不进 layout。
+- 结果三分：`layout`（可直接 `createSimFromLayout`）、`issues`（编译决策/拒绝）、
+  `layoutIssues`（layout schema 对产物的独立校验——外部引用仍是 warning）。
+
+### 17.2 验收（harness `compileTrackGraph`，21/21）
+
+- [x] 端到端：source(config) → infeed(straight+curve) ⇢handoff⇢ trunk → pack(sink)，
+      编译→建 sim→物料跨 handoff 到达 sink，吞吐 > 0。
+- [x] curve 段被采样为多折点且真实沿曲线（非仅端点）；`cornerRadius === 0`。
+- [x] dead-end 合成 sink（warning）；`onDeadEnd:"error"` 升级。
+- [x] 分支设备产出 `branching-device` error 且不进入 layout。
+- [x] 中段 handoff 产出 `mid-path-handoff` warning。
+- [x] 无 edges 的 junction 从 `config.simKind` 编译；悬空 route 目标保持 warning。
+- [x] 全部既有 harness 回归绿（12+14+14+9）；src / src+example 双 typecheck 通过。

@@ -40,14 +40,13 @@ Shipped toward this goal:
   `reset(seed?)` + `exportEpisode()`: same defs + same seed replays an
   episode bit-for-bit, and the exported event log is plain JSON with
   queryable structured payloads.
-- **Layer decision** — `src/sim/` is the single runtime kernel; `src/core/`
-  (TrackGraph & friends) is the design-time/geometry layer serving
-  TrackRenderer. Convergence, when needed, is a `TrackGraph → FactoryLayout`
-  compiler, not a merge.
+- **Layer decision, plus the bridge** — `src/sim/` is the single runtime
+  kernel; `src/core/` (TrackGraph & friends) is the design-time/geometry
+  layer serving TrackRenderer; and `compileTrackGraph` (`src/core/compileTrackGraph.ts`)
+  compiles a design-time graph into a runnable `FactoryLayout`.
 
-Current focus: a `TrackGraph → FactoryLayout` compiler (design-time to
-runtime bridge), scale-out (Worker-based sim, render LOD), and richer
-device models (failure rates, takt jitter, AGV/resource constraints).
+Current focus: scale-out (Worker-based sim, render LOD) and richer device
+models (failure rates, takt jitter, AGV/resource constraints).
 
 ## Features
 
@@ -98,6 +97,29 @@ const sim = createSimFromLayout(layout, { seed: 42 })
 const episode = sim.exportEpisode() // { seed, duration, events, stats }
 sim.reset(42) // rewind to t=0, keep control settings, replay exactly
 ```
+
+### Design-time graph → runtime layout
+
+Draw or edit the factory as a `TrackGraph` (poses, segment kinds, explicit
+hand-offs between devices), then compile it into the same `FactoryLayout`
+the sim runs:
+
+```ts
+import { compileTrackGraph, createSimFromLayout, TrackGraph } from 'r3f-tools'
+
+const graph = new TrackGraph()
+graph.addDevice({ id: 'infeed', kind: 'roller-conveyor', config: { speed: 2 } })
+// …nodes with makePose(), edges with segment kinds, handoff nodes between devices…
+
+const { layout, issues, layoutIssues } = compileTrackGraph(graph)
+// issues: structured compile decisions (branching devices rejected,
+// dead ends synthesize sinks, mid-path hand-offs warn)
+const sim = createSimFromLayout(layout, { seed: 42 })
+```
+
+Edgeless devices (sources, sinks, junctions, inspectors, buffers) declare
+themselves through `config.simKind` and read their remaining fields from
+the device `config` bag — see `compileTrackGraph`'s module docs.
 
 ### Factory track graph and device plugins
 
