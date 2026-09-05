@@ -7,13 +7,15 @@ import {
 	BUILTIN_DEVICE_PLUGINS,
 	BUFFER_KIND,
 	ConveyorBelt,
+	createSimFromLayout,
 	cuteLiftTransferPlugin,
 	type DeviceLayout,
 	DeviceRendererHost,
 	DeviceRendererRegistry,
 	ExternalContract,
 	type ExternalItemState,
-	FactorySim,
+	type FactoryLayout,
+	type FactorySim,
 	INSPECTOR_KIND,
 	INSPECTION_PLUGINS,
 	InstancedMeshPool,
@@ -23,6 +25,7 @@ import {
 	type SimPoint,
 	type SimStats,
 	TRANSFER_KIND,
+	validateFactoryLayout,
 } from "../src";
 
 // -----------------------------------------------------------------------------
@@ -662,13 +665,19 @@ function beltCurve(points: THREE.Vector3[]): THREE.CatmullRomCurve3 {
 // -----------------------------------------------------------------------------
 const CARGO_COLORS = PALETTE.cargoColors.map((c) => new THREE.Color(c));
 
-function buildFactorySim(beltPaths: BeltPath[], lift: number): FactorySim {
+/**
+ * The whole factory as serializable layout data. The returned object passes
+ * `validateFactoryLayout` and can be `JSON.stringify`ed — geometry is derived
+ * from the same belt centrelines the renderer draws, so sim and visuals can
+ * never drift apart.
+ */
+function buildFactoryLayout(beltPaths: BeltPath[], lift: number): FactoryLayout {
 	const toSim = (ps: THREE.Vector3[]): SimPoint[] =>
 		ps.map((p) => ({ x: p.x, y: p.y + lift, z: p.z }));
 
 	const clippedPoints = (id: string): THREE.Vector3[] => {
 		const path = beltPaths.find((p) => p.id === id);
-		if (!path) throw new Error(`buildFactorySim: unknown belt "${id}"`);
+		if (!path) throw new Error(`buildFactoryLayout: unknown belt "${id}"`);
 		const clipped = JUNCTIONS.reduce(
 			(pts, junction) =>
 				clipPathForJunction({ ...path, points: pts }, junction.center, junction.gap),
@@ -961,17 +970,19 @@ function buildFactorySim(beltPaths: BeltPath[], lift: number): FactorySim {
 		...EXT_LANES.map((lane) => ({ id: lane.sinkId, kind: "sink" } as SimDeviceDef)),
 	];
 
-	const sim = new FactorySim(defs);
-	// Mark every external lane as externally fed by default; the worldMode
-	// control flips the whole sim between sim / hybrid / external, and the
-	// per-lane leva dropdowns set each lane's signal contract.
-	for (const lane of EXT_LANES) {
-		sim.setDeviceDataSource(lane.id, "external", {
-			signal: lane.defaultKind,
-			frame: lane.defaultFrame,
-		});
-	}
-	return sim;
+	return {
+		version: 1,
+		name: "vivid-factory",
+		options: {
+			worldMode: "hybrid",
+			// External lanes are fed by the synthetic feeder from the start;
+			// the worldMode leva control flips them (and the world) live.
+			deviceSources: Object.fromEntries(
+				EXT_LANES.map((lane) => [lane.id, "external" as const]),
+			),
+		},
+		devices: defs,
+	};
 }
 
 // -----------------------------------------------------------------------------
@@ -1965,7 +1976,24 @@ export function VividFactoryConveyorExample() {
 	});
 
 	const beltPaths = useMemo(createBeltPaths, []);
-	const sim = useMemo(() => buildFactorySim(beltPaths, 0.28 / 2 + 0.09), [beltPaths]);
+	// The factory is layout data first: built declaratively, validated by the
+	// schema, then turned into a sim — the same path an external tool (or an
+	// AI agent editing JSON) would use.
+	const sim = useMemo(() => {
+		const layout = buildFactoryLayout(beltPaths, 0.28 / 2 + 0.09);
+		const warnings = validateFactoryLayout(layout);
+		for (const w of warnings) console.warn("[layout]", w.message);
+		const sim = createSimFromLayout(layout);
+		// Per-lane signal contracts (runtime config, applied immediately so the
+		// very first frame already resolves the right signal kind).
+		for (const lane of EXT_LANES) {
+			sim.setDeviceDataSource(lane.id, "external", {
+				signal: lane.defaultKind,
+				frame: lane.defaultFrame,
+			});
+		}
+		return sim;
+	}, [beltPaths]);
 
 	const rendererRegistry = useMemo(() => {
 		const registry = new DeviceRendererRegistry();
