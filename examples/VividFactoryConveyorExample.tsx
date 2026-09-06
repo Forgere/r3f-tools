@@ -1,7 +1,7 @@
 import { OrbitControls, RoundedBox, Stats, Text } from "@react-three/drei";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Canvas, type ThreeEvent, useFrame, useThree } from "@react-three/fiber";
 import { button, useControls } from "leva";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import * as THREE from "three";
 import {
 	BUILTIN_DEVICE_PLUGINS,
@@ -27,6 +27,19 @@ import {
 	TRANSFER_KIND,
 	validateFactoryLayout,
 } from "../src";
+import {
+	CodePathPanel,
+	type InstanceLookup,
+	type ItemPose,
+	Selectable,
+	SelectionOutline,
+	SelectionProvider,
+	useInstanceLookup,
+	useSelection,
+} from "./selection";
+import { codePathOf } from "./selection/modelSource";
+// 副作用：登记每个 kind 的渲染代码位置（面板据此显示 file:line 并跳转编辑器）。
+import "./selection/modelSources";
 
 // -----------------------------------------------------------------------------
 // Palette & styling inspired by the MICRODUCK reference image:
@@ -988,6 +1001,17 @@ function buildFactoryLayout(beltPaths: BeltPath[], lift: number): FactoryLayout 
 // -----------------------------------------------------------------------------
 // Cute racks with rounded shelves and little boxes.
 // -----------------------------------------------------------------------------
+// Decorative storage racks: given ids so they are selectable too — every
+// visible model should be able to name the code that renders it.
+const RACK_SPOTS: { id: string; label: string; position: [number, number, number] }[] = [
+	{ id: "rack-w1", label: "货架 W1", position: [-17, 0, -3] },
+	{ id: "rack-w2", label: "货架 W2", position: [-17, 0, 5] },
+	{ id: "rack-e1", label: "货架 E1", position: [18, 0, 3] },
+	// Demo conveyors: source racks feeding the ramp / spiral.
+	{ id: "rack-src-l", label: "坡道料架", position: [-20, 0, -9] },
+	{ id: "rack-src-r", label: "螺旋料架", position: [18, 0, -9] },
+];
+
 function CuteRack({ position }: { position: [number, number, number] }) {
 	const width = 2.4;
 	const depth = 1.6;
@@ -1273,13 +1297,20 @@ function SimCargoLayer({
 	frameHeight,
 	onTelemetry,
 	externalFeeder,
+	lookup,
+	poses,
 }: {
 	sim: FactorySim;
 	frameHeight: number;
 	onTelemetry?: (t: LaneTelemetry) => void;
 	externalFeeder?: (elapsed: number, delta: number) => void;
+	/** 实例槽位 ↔ itemId 反查，点击物料时用。 */
+	lookup: InstanceLookup;
+	/** itemId → 位姿，选中物料后画高亮框用。 */
+	poses: MutableRefObject<Map<number, ItemPose>>;
 }) {
 	const poolRef = useRef<InstancedMeshPoolRef>(null);
+	const { select } = useSelection();
 	const slotOf = useRef(new Map<number, number>());
 	const freeSlots = useRef<number[]>([]);
 	const initialized = useRef(false);
@@ -1326,6 +1357,7 @@ function SimCargoLayer({
 			const slot = freeSlots.current.pop();
 			if (slot === undefined) continue;
 			slotOf.current.set(s.itemId, slot);
+			lookup.bind(slot, s.itemId);
 			const color = CARGO_COLORS[s.colorIndex % CARGO_COLORS.length];
 			if (color) pool.setColorAt(slot, color);
 			colorsDirty = true;
@@ -1341,6 +1373,12 @@ function SimCargoLayer({
 			dummy.scale.setScalar(1);
 			dummy.updateMatrix();
 			pool.setMatrixAt(slot, dummy.matrix);
+			poses.current.set(m.itemId, {
+				x: m.x,
+				y: m.y,
+				z: m.z,
+				heading: m.heading,
+			});
 			matricesDirty = true;
 		}
 
@@ -1353,6 +1391,8 @@ function SimCargoLayer({
 			dummy.updateMatrix();
 			pool.setMatrixAt(slot, dummy.matrix);
 			slotOf.current.delete(id);
+			lookup.release(slot);
+			poses.current.delete(id);
 			freeSlots.current.push(slot);
 			matricesDirty = true;
 		}
@@ -1372,6 +1412,28 @@ function SimCargoLayer({
 		}
 	});
 
+	// 点中实例化物料：index → slot → itemId，选中并交给面板显示。
+	const onPick = useCallback(
+		(_event: ThreeEvent<THREE.Event>, index: number) => {
+			const itemId = lookup.itemAt(index);
+			if (itemId === undefined) return;
+			const item = sim.snapshot().find((it) => it.id === itemId);
+			select({
+				id: `item:${itemId}`,
+				kind: "cargo",
+				label: `物料 #${itemId}`,
+				codePath: codePathOf("cargo"),
+				itemId,
+				data: {
+					deviceId: item?.deviceId ?? "–",
+					typeId: item?.typeId ?? "–",
+					attrs: item?.attrs ?? {},
+				},
+			});
+		},
+		[lookup, select, sim],
+	);
+
 	return (
 		<InstancedMeshPool
 			ref={poolRef}
@@ -1381,6 +1443,7 @@ function SimCargoLayer({
 			batchSize={1000}
 			enableColors
 			frustumCulled
+			onClick={onPick}
 		/>
 	);
 }
@@ -1519,6 +1582,11 @@ function VividFactoryScene({
 	rendererRegistry: DeviceRendererRegistry;
 	externalFeeder?: (elapsed: number, delta: number) => void;
 }) {
+	// 物料是实例化渲染的：选中需要 slot↔itemId 与 itemId↔位姿两张反查表，
+	// 两者都是 FrameDelta 处理的副产品，零额外遍历。
+	const lookup = useInstanceLookup();
+	const poses = useRef<Map<number, ItemPose>>(new Map());
+
 	const frameMaterial = useMemo(
 		() =>
 			new THREE.MeshStandardMaterial({
@@ -1728,13 +1796,19 @@ function VividFactoryScene({
 			</RoundedBox>
 			<gridHelper args={[48, 48, 0x4f6267, 0x3a4a4f]} position={[0, -0.04, 0]} />
 
-			<CuteRack position={[-17, 0, -3]} />
-			<CuteRack position={[-17, 0, 5]} />
-			<CuteRack position={[18, 0, 3]} />
-
-			{/* Demo conveyors: source racks + spiral's central support column */}
-			<CuteRack position={[-20, 0, -9]} />
-			<CuteRack position={[18, 0, -9]} />
+			{RACK_SPOTS.map((rack) => (
+				<Selectable
+					key={rack.id}
+					meta={{
+						id: rack.id,
+						kind: "rack",
+						label: rack.label,
+						codePath: codePathOf("rack"),
+					}}
+				>
+					<CuteRack position={rack.position} />
+				</Selectable>
+			))}
 			<mesh position={[14, 1.8, -9]}>
 				<cylinderGeometry args={[0.18, 0.18, 3.6, 16]} />
 				<meshStandardMaterial color={"#9aa7b5"} roughness={0.6} metalness={0.3} />
@@ -1742,22 +1816,31 @@ function VividFactoryScene({
 
 			{beltRenderData.map((path, index) =>
 				visibleLines[path.id] ? (
-					<ConveyorBelt
+					<Selectable
 						key={path.id}
-						curvePath={path.clippedPoints}
-						rollerSpacing={0.22}
-						frameWidth={path.frameWidth ?? 1.1}
-						frameHeight={0.28}
-						frameDepth={0.12}
-						rollerRadius={0.055}
-						rollerLength={(path.frameWidth ?? 1.1) + 0.15}
-						frameMaterial={frameMaterial}
-						rollerMaterial={rollerMaterial}
-						pathMaterial={beltMaterials[index]}
-						segments={24}
-						showPath
-						arrowSpeed={0.5 * globalSpeed}
-					/>
+						meta={{
+							id: path.id,
+							kind: "conveyor-belt",
+							label: `输送线 ${path.id}`,
+							codePath: codePathOf("conveyor-belt"),
+						}}
+					>
+						<ConveyorBelt
+							curvePath={path.clippedPoints}
+							rollerSpacing={0.22}
+							frameWidth={path.frameWidth ?? 1.1}
+							frameHeight={0.28}
+							frameDepth={0.12}
+							rollerRadius={0.055}
+							rollerLength={(path.frameWidth ?? 1.1) + 0.15}
+							frameMaterial={frameMaterial}
+							rollerMaterial={rollerMaterial}
+							pathMaterial={beltMaterials[index]}
+							segments={24}
+							showPath
+							arrowSpeed={0.5 * globalSpeed}
+						/>
+					</Selectable>
 				) : null,
 			)}
 
@@ -1773,38 +1856,65 @@ function VividFactoryScene({
 			))}
 
 			{transferDevices.map((device) => (
-				<DeviceRendererHost
+				<Selectable
 					key={device.id}
-					registry={rendererRegistry}
-					source={sim}
-					deviceId={device.id}
-					kind={TRANSFER_KIND}
-					layout={device.layout}
-					config={{ liftHeight: LIFT_HEIGHT }}
-				/>
+					meta={{
+						id: device.id,
+						kind: TRANSFER_KIND,
+						label: `分流转接台 ${device.id}`,
+						codePath: codePathOf(TRANSFER_KIND),
+					}}
+				>
+					<DeviceRendererHost
+						registry={rendererRegistry}
+						source={sim}
+						deviceId={device.id}
+						kind={TRANSFER_KIND}
+						layout={device.layout}
+						config={{ liftHeight: LIFT_HEIGHT }}
+					/>
+				</Selectable>
 			))}
 
 			{inspectionDevices.map((device) => (
-				<DeviceRendererHost
+				<Selectable
 					key={device.id}
-					registry={rendererRegistry}
-					source={sim}
-					deviceId={device.id}
-					kind={INSPECTOR_KIND}
-					layout={device.layout}
-				/>
+					meta={{
+						id: device.id,
+						kind: INSPECTOR_KIND,
+						label: `质检站台 ${device.id}`,
+						codePath: codePathOf(INSPECTOR_KIND),
+					}}
+				>
+					<DeviceRendererHost
+						registry={rendererRegistry}
+						source={sim}
+						deviceId={device.id}
+						kind={INSPECTOR_KIND}
+						layout={device.layout}
+					/>
+				</Selectable>
 			))}
 
 			{bufferDevices.map((device) => (
-				<DeviceRendererHost
+				<Selectable
 					key={device.id}
-					registry={rendererRegistry}
-					source={sim}
-					deviceId={device.id}
-					kind={BUFFER_KIND}
-					layout={device.layout}
-					config={device.config}
-				/>
+					meta={{
+						id: device.id,
+						kind: BUFFER_KIND,
+						label: `不合格货架 ${device.id}`,
+						codePath: codePathOf(BUFFER_KIND),
+					}}
+				>
+					<DeviceRendererHost
+						registry={rendererRegistry}
+						source={sim}
+						deviceId={device.id}
+						kind={BUFFER_KIND}
+						layout={device.layout}
+						config={device.config}
+					/>
+				</Selectable>
 			))}
 
 
@@ -1841,6 +1951,8 @@ function VividFactoryScene({
 				frameHeight={0.28}
 				onTelemetry={onTelemetry}
 				externalFeeder={externalFeeder}
+				lookup={lookup}
+				poses={poses}
 			/>
 
 			{showPaths &&
@@ -1857,6 +1969,9 @@ function VividFactoryScene({
 						</line>
 					);
 				})}
+
+			{/* 选中高亮：设备走 Box3，物料走 SimCargoLayer 维护的位姿表 */}
+			<SelectionOutline getItemPose={(id) => poses.current.get(id) ?? null} />
 
 			<OrbitControls
 				enablePan
@@ -1976,11 +2091,16 @@ export function VividFactoryConveyorExample() {
 	});
 
 	const beltPaths = useMemo(createBeltPaths, []);
+	// Kept on its own so the selection panel can show the data-layer definition
+	// (layout.devices[i]) of whatever got picked.
+	const layout = useMemo(
+		() => buildFactoryLayout(beltPaths, 0.28 / 2 + 0.09),
+		[beltPaths],
+	);
 	// The factory is layout data first: built declaratively, validated by the
 	// schema, then turned into a sim — the same path an external tool (or an
 	// AI agent editing JSON) would use.
 	const sim = useMemo(() => {
-		const layout = buildFactoryLayout(beltPaths, 0.28 / 2 + 0.09);
 		const warnings = validateFactoryLayout(layout);
 		for (const w of warnings) console.warn("[layout]", w.message);
 		const sim = createSimFromLayout(layout);
@@ -1993,7 +2113,7 @@ export function VividFactoryConveyorExample() {
 			});
 		}
 		return sim;
-	}, [beltPaths]);
+	}, [layout]);
 
 	const rendererRegistry = useMemo(() => {
 		const registry = new DeviceRendererRegistry();
@@ -2311,22 +2431,37 @@ export function VividFactoryConveyorExample() {
 				</div>
 			</div>
 
-			<Canvas camera={{ position: cam.position, fov: 50 }} shadows gl={{ antialias: true }}>
-				<CameraController
-					targetPosition={new THREE.Vector3(...cam.position)}
-					targetLookAt={new THREE.Vector3(...cam.target)}
+			{/*
+			  SelectionProvider 在 Canvas 外部、Canvas 内部都能被读到——
+			  R3F 自带 context bridge（useBridge / its-fine），所以 `Selectable`
+			  在 Canvas 内能 useSelection，CodePathPanel 在 Canvas 外也能拿到当前选中态。
+			*/}
+			<SelectionProvider>
+				<Canvas camera={{ position: cam.position, fov: 50 }} shadows gl={{ antialias: true }}>
+					<CameraController
+						targetPosition={new THREE.Vector3(...cam.position)}
+						targetLookAt={new THREE.Vector3(...cam.target)}
+					/>
+					<VividFactoryScene
+						beltPaths={beltPaths}
+						sim={sim}
+						globalSpeed={globalSpeed}
+						showPaths={showPaths}
+						visibleLines={visibleLines}
+						onTelemetry={handleTelemetry}
+						rendererRegistry={rendererRegistry}
+						externalFeeder={externalFeeder}
+					/>
+				</Canvas>
+				<CodePathPanel
+					getDeviceState={(id) =>
+						(sim.getDeviceState(id) as unknown as Record<string, unknown>) ?? undefined
+					}
+					getLayoutDef={(id) =>
+						layout.devices.find((d) => d.id === id) as unknown
+					}
 				/>
-				<VividFactoryScene
-					beltPaths={beltPaths}
-					sim={sim}
-					globalSpeed={globalSpeed}
-					showPaths={showPaths}
-					visibleLines={visibleLines}
-					onTelemetry={handleTelemetry}
-					rendererRegistry={rendererRegistry}
-					externalFeeder={externalFeeder}
-				/>
-			</Canvas>
+			</SelectionProvider>
 		</div>
 	);
 }
