@@ -9,6 +9,7 @@
 		"dist",
 		"src",
 		"README.md",
+		"README_zh.md",
 		"package.json",
 		"LICENSE"
 	],
