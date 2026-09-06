@@ -1,4 +1,4 @@
-import { OrbitControls, RoundedBox, Stats, Text } from "@react-three/drei";
+import { RoundedBox, Stats, Text, OrbitControls } from "@react-three/drei";
 import { Canvas, type ThreeEvent, useFrame, useThree } from "@react-three/fiber";
 import { button, useControls } from "leva";
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
@@ -29,6 +29,8 @@ import {
 } from "../src";
 import {
 	CodePathPanel,
+	type FactoryCameraControlsApi,
+	FactoryCameraControls,
 	type InstanceLookup,
 	type ItemPose,
 	Selectable,

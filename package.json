@@ -64,6 +64,7 @@
 		"@types/react-dom": "^19.1.1",
 		"@types/three": "^0.178.0",
 		"@vitejs/plugin-react": "^4.3.4",
+		"camera-controls": "^3.1.0",
 		"jest": "^29.7.0",
 		"react": "^19.1.1",
 		"react-dom": "^19.1.1",

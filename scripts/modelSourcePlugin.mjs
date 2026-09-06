@@ -12,7 +12,9 @@
  *   export default defineConfig({ plugins: [react(), modelSourcePlugin({ projectRoot: __dirname })] });
  */
 
-const DEFAULT_INCLUDE = /src[\\/]devices[\\/].*\.[jt]sx?$/;
+// 默认只给"组件文件"追加 __source：src/{components,devices}/**。
+// 不覆盖全 src/，避免给无关业务模块（如 src/sim/types.ts）注入运行时副作用。
+const DEFAULT_INCLUDE = /src[\\/](?:components|devices)[\\/].*\.[jt]sx?$/;
 const DEFAULT_TAGS = ["Selectable", "DeviceRendererHost"];
 
 function toPosix(p) {
@@ -57,18 +59,33 @@ function scanTagEnd(code, start) {
 
 function componentDeclarations(code) {
   const found = [];
-  const patterns = [
-    /export\s+function\s+([A-Z]\w*)/g,
-    /export\s+const\s+([A-Z]\w*)\s*=/g,
-    /export\s+default\s+function\s+([A-Z]\w*)/g,
-  ];
-  for (const re of patterns) {
-    let m;
-    while ((m = re.exec(code)) !== null) {
-      found.push({ name: m[1], line: lineAt(code, m.index) });
-    }
+  // 函数声明：export function Foo(){} 或 export default function Foo(){}
+  const fnRe = /export\s+(?:default\s+)?function\s+([A-Z][A-Za-z0-9]*)/g;
+  let m;
+  while ((m = fnRe.exec(code)) !== null) {
+    const name = m[1];
+    if (/^[A-Z][A-Z0-9_]*$/.test(name)) continue; // ALL_CAPS 常量
+    found.push({ name, line: lineAt(code, m.index) });
+  }
+  // 常量形式：export const Foo = forwardRef(...)/memo(...)/(...)=>/function
+  // 不接受 `Foo = "literal"` `Foo = {…}` `Foo = 123` 等纯值。
+  const constRe = /export\s+const\s+([A-Z][A-Za-z0-9]*)\s*=\s*([\s\S]*?)(?=\nexport|\n\/\/|\n\/\*|\n\s*$)/g;
+  while ((m = constRe.exec(code)) !== null) {
+    const name = m[1];
+    if (/^[A-Z][A-Z0-9_]*$/.test(name)) continue;
+    const rhs = m[2].trimStart();
+    if (!/^(forwardRef|memo|function|\(|[A-Z]\w*\s*=>|\([^)]*\)\s*=>)/.test(rhs)) continue;
+    found.push({ name, line: lineAt(code, m.index) });
   }
   return found;
+}
+
+/**
+ * 旧版导出（保留 API 兼容），现在内部即上面那个合并扫描。
+ * @deprecated use {@link componentDeclarations}
+ */
+function findExportedArrowOrWrappedComponents(code) {
+  return componentDeclarations(code);
 }
 
 export function modelSourcePlugin(options = {}) {
