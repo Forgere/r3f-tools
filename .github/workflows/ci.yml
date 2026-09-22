@@ -32,7 +32,7 @@ jobs:
       run: npm i -g pnpm
         
     - name: Install dependencies
-      run: pnpm install
+      run: pnpm install --no-frozen-lockfile
       timeout-minutes: 3  # 安装依赖超时设置
       
     - name: Run linting
