@@ -1,5 +1,7 @@
 # R3F Tools
 
+English | [简体中文](./README_zh.md)
+
 A collection of useful components and utilities for React Three Fiber applications, designed to improve performance and simplify common patterns.
 
 ## Project Goal
